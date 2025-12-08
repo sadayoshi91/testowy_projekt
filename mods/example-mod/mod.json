@@ -1,0 +1,6 @@
+{
+  "id": "example-mod",
+  "name": "Example Items Mod",
+  "description": "Adds new desks and chairs",
+  "dataFiles": ["add_items.json"]
+}

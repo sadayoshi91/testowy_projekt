@@ -1,0 +1,4 @@
+html,body,#root { height: 100%; margin: 0; font-family: Arial, Helvetica, sans-serif; }
+.app { display: flex; height: 100%; }
+.left { flex: 1; padding: 12px; border-right: 1px solid #ddd; }
+.right { width: 360px; padding: 12px; }

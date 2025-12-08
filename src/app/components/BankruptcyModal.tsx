@@ -1,0 +1,31 @@
+import React from 'react';
+
+export function BankruptcyModal({ open, funds, onLoan, onInvestor, onRollback }: { open:boolean, funds:number, onLoan: (amt:number)=>void, onInvestor: ()=>void, onRollback: ()=>void }) {
+  if (!open) return null;
+  return (
+    <div style={{ position:'fixed', left:0, top:0, right:0, bottom:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:3000 }}>
+      <div style={{ width:520, background:'#fff', borderRadius:8, padding:18 }}>
+        <h2 style={{ marginTop:0, color:'#b00020' }}>Bankruptcy alert</h2>
+        <p>Funds are critically low: <strong>{funds.toFixed(2)}</strong></p>
+        <p>You can choose one of recovery actions:</p>
+        <div style={{ display:'flex', gap:10, marginTop:12 }}>
+          <div style={{ flex:1, border:'1px solid #eee', padding:10, borderRadius:6 }}>
+            <h4>Take a short loan</h4>
+            <p>Get immediate funds (+2000) but pay higher interest later.</p>
+            <button onClick={() => onLoan(2000)}>Take loan 2000</button>
+          </div>
+          <div style={{ flex:1, border:'1px solid #eee', padding:10, borderRadius:6 }}>
+            <h4>Seek investor</h4>
+            <p>Receive 5000 equity investment (one-time).</p>
+            <button onClick={onInvestor}>Get investor 5000</button>
+          </div>
+          <div style={{ flex:1, border:'1px solid #eee', padding:10, borderRadius:6 }}>
+            <h4>Rollback payroll</h4>
+            <p>Revert last payroll payout from history (if available).</p>
+            <button onClick={onRollback}>Rollback</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

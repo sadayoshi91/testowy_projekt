@@ -1,0 +1,44 @@
+export type OfficeItem = {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  ownerId?: string | null;
+};
+
+export type Employee = {
+  id: string;
+  name: string;
+  role: string;
+  salary: number;
+  productivity: number;
+};
+
+export type Project = {
+  id: string;
+  type: string;
+  progress: number;
+  reward: number;
+};
+
+export type CompanyState = {
+  name: string;
+  funds: number;
+  day: number;
+  projects: Project[];
+  employees: Employee[];
+  office: {
+    width: number;
+    height: number;
+    items: OfficeItem[];
+  };
+};
+
+export const createEmptyCompany = (): CompanyState => ({
+  name: 'My Startup',
+  funds: 10000,
+  day: 1,
+  projects: [],
+  employees: [],
+  office: { width: 10, height: 6, items: [] }
+});
