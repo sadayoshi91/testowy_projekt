@@ -1,0 +1,7 @@
+Zmiana0.2.3
+
+- Dodano panel biura (Office): wynajem/zakup biur, lista biurek
+- Przypisywanie pracowników do biurek
+- Ulepszanie biurek (np. lepsze krzes³o = +produktywnoœæ)
+- Efekty ulepszeñ na produktywnoœæ/morale w tickCallback
+- Nowa zak³adka Office w menu

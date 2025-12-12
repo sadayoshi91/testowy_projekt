@@ -1,0 +1,56 @@
+﻿import React from 'react';
+import { Contract } from '../../models/contract';
+import { Role } from '../../models/project';
+
+export function ContractsPanel({ contracts, onAccept, darkMode }: {
+ contracts: Contract[],
+ onAccept: (id: string) => void,
+ darkMode?: boolean
+}) {
+ const panelStyle = {
+ border: '1px solid',
+ borderColor: darkMode ? '#444' : '#ccc',
+ borderRadius:6,
+ padding:10,
+ background: darkMode ? '#232323' : '#f9f9ff',
+ color: darkMode ? '#fff' : '#222',
+ marginBottom:12
+ };
+ const contractStyle = {
+ borderBottom: '1px solid',
+ borderColor: darkMode ? '#333' : '#eee',
+ marginBottom:8,
+ paddingBottom:8
+ };
+ const buttonStyle = {
+ background: darkMode ? '#333' : '#fff',
+ color: darkMode ? '#fff' : '#222',
+ border: '1px solid',
+ borderColor: darkMode ? '#555' : '#ccc',
+ borderRadius:4,
+ padding: '4px10px',
+ cursor: 'pointer',
+ marginTop:4
+ };
+ return (
+ <div style={panelStyle}>
+ <h3 style={{ color: darkMode ? '#fff' : '#222' }}>Available Contracts</h3>
+ {contracts.length ===0 && <div style={{ color: darkMode ? '#aaa' : '#777' }}>No contracts available</div>}
+ {contracts.map(contract => (
+ <div key={contract.id} style={contractStyle}>
+ <div><strong>{contract.name}</strong> <small>({contract.status})</small></div>
+ <div style={{ fontSize:13, color: darkMode ? '#ccc' : '#555' }}>{contract.description}</div>
+ <div>Reward: <strong>{contract.reward}</strong></div>
+ <div>Deadline: {new Date(contract.deadline).toLocaleDateString()}</div>
+ <div>Roles: {contract.requiredRoles.join(', ')}</div>
+ {contract.status === 'available' && (
+ <button style={buttonStyle} onClick={() => onAccept(contract.id)}>Accept contract</button>
+ )}
+ {contract.status === 'accepted' && <span style={{ color: '#0a0' }}>Accepted</span>}
+ {contract.status === 'completed' && <span style={{ color: '#00a' }}>Completed</span>}
+ {contract.status === 'expired' && <span style={{ color: '#a00' }}>Expired</span>}
+ </div>
+ ))}
+ </div>
+ );
+}

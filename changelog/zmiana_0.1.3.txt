@@ -1,0 +1,4 @@
+Zmiana0.1.3
+
+- Dodano automatyczne wpisy do event loga przy tworzeniu, edycji, usuwaniu i zmianie statusu projektu
+- Historia zmian projektów widoczna w panelu Event Log

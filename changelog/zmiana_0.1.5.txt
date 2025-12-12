@@ -1,0 +1,5 @@
+Zmiana0.1.5
+
+- Dodano komponent ContractsPanel do wyœwietlania i przyjmowania kontraktów
+- Dodano przyk³adowe kontrakty do stanu pocz¹tkowego firmy
+- Obs³uga przyjmowania kontraktu: zmiana statusu, utworzenie projektu na podstawie kontraktu, wpis do event loga

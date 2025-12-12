@@ -1,0 +1,35 @@
+﻿import React from 'react';
+import { Competitor } from '../../models/competitor';
+
+export function CompetitorsPanel({ competitors, darkMode }: { competitors: Competitor[], darkMode?: boolean }) {
+ const panelStyle = {
+ border: '1px solid',
+ borderColor: darkMode ? '#444' : '#ccc',
+ borderRadius:6,
+ padding:10,
+ background: darkMode ? '#232323' : '#fff',
+ color: darkMode ? '#fff' : '#222',
+ marginBottom:12
+ };
+ return (
+ <div style={panelStyle}>
+ <h3 style={{ color: darkMode ? '#fff' : '#222' }}>Competitors</h3>
+ {competitors.length ===0 && <div style={{ color: darkMode ? '#aaa' : '#777' }}>No competitors yet</div>}
+ <table style={{ width:'100%', color: darkMode ? '#fff' : '#222', fontSize:14 }}>
+ <thead>
+ <tr><th>Name</th><th>Reputation</th><th>Completed</th><th>Funds</th></tr>
+ </thead>
+ <tbody>
+ {competitors.map(c => (
+ <tr key={c.id}>
+ <td>{c.name}</td>
+ <td>{c.reputation}</td>
+ <td>{c.completedContracts}</td>
+ <td>{c.funds}</td>
+ </tr>
+ ))}
+ </tbody>
+ </table>
+ </div>
+ );
+}

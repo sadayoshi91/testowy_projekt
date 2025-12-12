@@ -39,10 +39,12 @@ export class ProjectSystem {
   // tickProjects: apply progress based on employees assigned
   tickProjects(state: CompanyState): CompanyState {
     const projects = (state.projects || []).map((p:any) => ({ ...p })) as Project[];
-    const employees: Employee[] = state.employees || [];
+    const employees = (state.employees || []) as Employee[];
+    const currentDay = state.day ?? 1;
+    const tickMultiplier = (state as any).tickMultiplier || 1;
 
     for (const proj of projects) {
-      if (proj.completed) continue;
+      if (proj.completed || proj.failed) continue;
 
       // sum contributions of assignees
       let contrib = 0;
@@ -52,23 +54,31 @@ export class ProjectSystem {
         contrib += employeeContribution(emp, proj);
       }
 
-      // apply progress (you can divide by a factor to slow progress)
-      const progressGain = contrib * (state.tickMultiplier || 1);
+      const progressGain = contrib * tickMultiplier;
       proj.progress += progressGain;
 
-      // clamp and mark complete
       if (proj.progress >= proj.effort) {
         proj.progress = proj.effort;
         proj.completed = true;
+        proj.status = 'completed';
+      }
+
+      if (!proj.completed && proj.deadlineDay && currentDay > proj.deadlineDay) {
+        proj.failed = true;
+        proj.status = 'paused';
       }
     }
 
-    // when projects completed — pay reward once
     let fundsDelta = 0;
     for (const proj of projects) {
       if (proj.completed && !proj.rewardPaid) {
         fundsDelta += proj.reward;
         proj.rewardPaid = true;
+      }
+      if (proj.failed && !proj.penaltyApplied) {
+        const penalty = proj.penalty ?? Math.round(proj.reward * 0.2);
+        fundsDelta -= penalty;
+        proj.penaltyApplied = true;
       }
     }
 

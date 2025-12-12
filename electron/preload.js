@@ -35,10 +35,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // List mods (calls main list-mods handler) -> returns array
-    listMods: async () => {
+    listMods: () => ipcRenderer.invoke('list-mods'),
+
+    // List saves (calls main list-saves handler) -> returns array
+    listSaves: async () => {
         try {
-            const res = await ipcRenderer.invoke('list-mods');
-            return { success: true, mods: res || [] };
+            const res = await ipcRenderer.invoke('list-saves');
+            return { success: true, data: res };
         } catch (e) {
             return { success: false, error: e && e.message ? e.message : String(e) };
         }

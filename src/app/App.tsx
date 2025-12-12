@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { createEmptyCompany } from '../models/company';
+import React, { useEffect, useState, useRef, useReducer, useCallback, useMemo } from 'react';
+import { createEmptyCompany, CompanyState, getDefaultContracts, getDefaultOffices, getDefaultResearches, getDefaultCompetitors, getDefaultTrainings } from '../models/company';
 import { TickManager } from '../simulation/TickManager';
 import { HRSystem } from '../systems/HRSystem';
 import { ProjectSystem } from '../systems/ProjectSystem';
@@ -16,41 +16,405 @@ import { BankruptcyModal } from './components/BankruptcyModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OfficeGrid } from './components/OfficeGrid';
 import { listMods } from '../services/ModLoader';
-import { useEconomy } from './hooks/useEconomy';
 import { usePayrollHelpers } from './hooks/usePayroll';
+import { Project, Role } from '../models/project';
+import { ContractsPanel } from './components/ContractsPanel';
+import { TrainingsPanel } from './components/TrainingsPanel';
+import { Training } from '../models/training';
+import { ResearchPanel } from './components/ResearchPanel';
+import { Research } from '../models/research';
+import type { Employee, Skills, Role as EmployeeRole, Level as EmployeeLevelType } from '../models/employee';
+import type { IconType } from 'react-icons';
+import {
+  HiOutlineDocumentText,
+  HiOutlineSquares2X2,
+  HiOutlineUserGroup,
+  HiOutlineAcademicCap,
+  HiOutlineBanknotes,
+  HiOutlineClipboardDocumentList,
+  HiOutlineMoon,
+  HiOutlineSun,
+  HiOutlineBeaker,
+  HiOutlineBuildingOffice2,
+  HiOutlineTrophy,
+  HiOutlineBolt,
+  HiOutlineFlag,
+  HiOutlineChartBar
+} from 'react-icons/hi2';
+import { OfficePanel } from './components/OfficePanel';
+import { Office } from '../models/office';
+import { CompetitorsPanel } from './components/CompetitorsPanel';
+import { Competitor } from '../models/competitor';
+import { GameEventsPanel } from './components/GameEventsPanel';
+import { StatsPanel } from './components/StatsPanel';
+import { MissionsPanel } from './components/MissionsPanel';
+import { MainMenu } from './components/MainMenu';
+import { generateContractsBatch } from '../services/ContractGenerator';
+import { OfficeMap } from './components/OfficeMap';
+import { SaveManagerModal, SaveSlot } from './components/SaveManagerModal';
+import './AppLayout.css';
+import { CurrencyContext } from './context/CurrencyContext';
+import { CURRENCY_PROFILES, CurrencyCode } from './currency';
+import { I18nProvider, Language, messages } from './i18n';
 
+const DEFAULT_ROLES: Role[] = ['developer', 'designer'];
+const DEFAULT_STATUS = 'active';
+const NEW_PROJECT_TEMPLATE = {
+  name: '',
+  description: '',
+  effort: 100,
+  reward: 1000,
+  requiredRoles: [...DEFAULT_ROLES],
+};
+const SAVE_VERSION = 2;
+const SAVE_NAME_REGEX = /^[a-z0-9-_]{3,32}$/i;
+type CompanyUpdater = (state: any) => any;
+type CompanyAction =
+  | { type: 'replace'; value: any }
+  | { type: 'update'; updater: CompanyUpdater };
+
+const companyReducer = (state: any, action: CompanyAction): any => {
+  switch (action.type) {
+    case 'replace':
+      return action.value;
+    case 'update':
+      return action.updater(state);
+    default:
+      return state;
+  }
+};
+const ROLE_SKILL_MAP: Record<Role, keyof Skills> = {
+  developer: 'coding',
+  designer: 'design',
+  marketer: 'marketing',
+  researcher: 'research',
+};
+
+type ProjectStatus = 'active' | 'completed' | 'paused';
+type EmployeeLevel = EmployeeLevelType;
+
+const EMPLOYEE_FIRST_NAMES = ['Alex','Maya','Jordan','Nina','Leo','Ivy','Marcus','Sara','Kenji','Ola'];
+const EMPLOYEE_LAST_NAMES = ['Nowak','Kowalski','Lee','Lopez','Singh','Chen','Khan','Novak','Smith','Ivanova'];
+const ROLE_OPTIONS: Role[] = ['developer','designer','marketer','researcher'];
+const LEVEL_OPTIONS: EmployeeLevel[] = ['junior','mid','senior'];
+const SKILL_BY_LEVEL: Record<EmployeeLevel, number> = { junior: 50, mid: 70, senior: 90 };
+const SALARY_BY_LEVEL: Record<EmployeeLevel, number> = { junior: 220, mid: 360, senior: 540 };
+
+const pickRandom = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+const randomEmployeeName = () => `${pickRandom(EMPLOYEE_FIRST_NAMES)} ${pickRandom(EMPLOYEE_LAST_NAMES)}`;
+
+type CandidateTrait = {
+  key: 'focused' | 'multidisciplinary' | 'mentor' | 'sprinter';
+  label: string;
+  description: string;
+  apply: (employee: Employee) => Employee;
+};
+
+type RecruitCandidate = {
+  id: string;
+  name: string;
+  role: Role;
+  level: EmployeeLevel;
+  baseSkill: number;
+  salary: number;
+  hiringCost: number;
+  trait: CandidateTrait;
+};
+
+const CANDIDATE_TRAITS: CandidateTrait[] = [
+  {
+    key: 'focused',
+    label: 'Focused',
+    description: '+10% productivity and +5 morale on hire.',
+    apply: (employee) => ({
+      ...employee,
+      productivity: +(employee.productivity * 1.1).toFixed(2),
+      morale: Math.min(100, (employee.morale || 0) + 5),
+    }),
+  },
+  {
+    key: 'multidisciplinary',
+    label: 'Multidisciplinary',
+    description: '+6 to every skill (max 100).',
+    apply: (employee) => {
+      const boosted: Skills = { ...employee.skills };
+      (Object.keys(boosted) as (keyof Skills)[]).forEach((key) => {
+        boosted[key] = Math.min(100, boosted[key] + 6);
+      });
+      return { ...employee, skills: boosted };
+    },
+  },
+  {
+    key: 'mentor',
+    label: 'Team Mentor',
+    description: '+15 morale and -10 fatigue when hired.',
+    apply: (employee) => ({
+      ...employee,
+      morale: Math.min(100, (employee.morale || 0) + 15),
+      fatigue: Math.max(0, (employee.fatigue || 0) - 10),
+    }),
+  },
+  {
+    key: 'sprinter',
+    label: 'Project Sprinter',
+    description: 'Starts in fast pace with +5% productivity.',
+    apply: (employee) => ({
+      ...employee,
+      workPace: 'fast',
+      productivity: +(employee.productivity * 1.05).toFixed(2),
+    }),
+  },
+];
+
+const CANDIDATE_POOL_SIZE = 4;
+const CANDIDATE_REFRESH_COST = 750;
+const CONTRACT_MANUAL_REFRESH_COST = 1500;
+const CONTRACT_REFRESH_COOLDOWN_DAYS = 3;
+const DEFAULT_CURRENCY: CurrencyCode = 'USD';
+
+const clampSkill = (value: number) => Math.max(35, Math.min(100, value));
+
+const pickLevelForReputation = (reputation: number): EmployeeLevel => {
+  const repFactor = Math.min(0.4, Math.max(0, reputation - 60) / 400);
+  const roll = Math.random();
+  if (roll > 0.75 - repFactor) return 'senior';
+  if (roll > 0.35 - repFactor * 0.5) return 'mid';
+  return 'junior';
+};
+
+const generateRecruitCandidate = (reputation: number): RecruitCandidate => {
+  const level = pickLevelForReputation(reputation);
+  const role = pickRandom(ROLE_OPTIONS);
+  const trait = pickRandom(CANDIDATE_TRAITS);
+  const repFactor = Math.min(0.35, Math.max(0, reputation - 80) / 400);
+  const baseSkill = clampSkill(
+    SKILL_BY_LEVEL[level] + Math.round((Math.random() - 0.5) * 25) + Math.round(repFactor * 20)
+  );
+  const salary = Math.max(
+    140,
+    Math.round(SALARY_BY_LEVEL[level] * (0.9 + Math.random() * 0.5 + repFactor * 0.4))
+  );
+  const hiringCost = Math.round(salary * (1.2 + Math.random() * 0.8));
+  return {
+    id: 'cand_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    name: randomEmployeeName(),
+    role,
+    level,
+    baseSkill,
+    salary,
+    hiringCost,
+    trait,
+  };
+};
+
+const generateCandidatePool = (reputation: number, size = CANDIDATE_POOL_SIZE) =>
+  Array.from({ length: size }, () => generateRecruitCandidate(reputation));
+
+const applyTraitToEmployee = (employee: Employee, trait: CandidateTrait): Employee => {
+  const cloned: Employee = {
+    ...employee,
+    skills: { ...employee.skills },
+  };
+  const modified = trait.apply(cloned);
+  return {
+    ...modified,
+    trait: trait.label,
+    traitDescription: trait.description,
+  };
+};
+
+const applyTrainingToEmployee = (employee: Employee, training: Training): Employee => {
+  const skillKey = ROLE_SKILL_MAP[training.role];
+  const updatedSkills: Skills = { ...employee.skills };
+  if (skillKey) {
+    const currentValue = updatedSkills[skillKey] || 0;
+    updatedSkills[skillKey] = clampSkill(currentValue + training.skillGain);
+  }
+  const moraleGain = training.moraleGain ?? 0;
+  let unlockedRoles = employee.unlockedRoles || [];
+  if (training.newRole && !unlockedRoles.includes(training.newRole)) {
+    unlockedRoles = [...unlockedRoles, training.newRole];
+  }
+  const trainingHistory = [...(employee.trainingHistory || []), training.id];
+  return {
+    ...employee,
+    skills: updatedSkills,
+    morale: Math.min(100, (employee.morale || 0) + moraleGain),
+    onTraining: false,
+    unlockedRoles,
+    trainingHistory,
+  };
+};
+
+const normalizeCompanyState = (state: any): CompanyState => {
+  const base = createEmptyCompany();
+  return {
+    ...base,
+    ...state,
+    contracts: state?.contracts?.length ? state.contracts : getDefaultContracts(),
+    offices: state?.offices?.length ? state.offices : getDefaultOffices(),
+    researches: state?.researches?.length ? state.researches : getDefaultResearches(),
+    competitors: state?.competitors?.length ? state.competitors : getDefaultCompetitors(),
+    trainings: state?.trainings?.length ? state.trainings : getDefaultTrainings(),
+    projects: state?.projects || [],
+    employees: state?.employees || [],
+    events: state?.events || [],
+    gameEvents: state?.gameEvents || [],
+    missions: state?.missions || [],
+    unlockedTechnologies: state?.unlockedTechnologies || [],
+    payrollHistory: state?.payrollHistory || [],
+    office: state?.office || base.office,
+    selectedOfficeId: state?.selectedOfficeId ?? base.selectedOfficeId,
+    reputation: state?.reputation ?? base.reputation,
+    funds: state?.funds ?? base.funds,
+    day: state?.day ?? base.day,
+    name: state?.name ?? base.name,
+    nextContractRefreshDay: state?.nextContractRefreshDay ?? base.nextContractRefreshDay,
+    lastContractRefreshDay: state?.lastContractRefreshDay ?? base.lastContractRefreshDay,
+  };
+};
 
 const App: React.FC = () => {
-  const [company, setCompany] = useState<any>(createEmptyCompany());
+  const [company, dispatchCompany] = useReducer(companyReducer, undefined, () => createEmptyCompany());
+  const setCompany = useCallback((valueOrUpdater: any) => {
+    if (typeof valueOrUpdater === 'function') {
+      dispatchCompany({ type: 'update', updater: valueOrUpdater as CompanyUpdater });
+    } else {
+      dispatchCompany({ type: 'replace', value: valueOrUpdater });
+    }
+  }, []);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [confirmProps, setConfirmProps] = useState<any>(null);
   const [bankruptOpen, setBankruptOpen] = useState(false);
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [newProject, setNewProject] = useState(() => ({ ...NEW_PROJECT_TEMPLATE }));
+  const [editProjectId, setEditProjectId] = useState<string|null>(null);
+  const [editProject, setEditProject] = useState<any>(null);
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [sortKey, setSortKey] = useState<string>('createdAt');
+  const [activeTab, setActiveTab] = useState<string>('contracts');
+  const [darkMode, setDarkMode] = useState(false);
+  const [tickSpeed, setTickSpeed] = useState(1000); // domyślnie x1
+  const [gameHour, setGameHour] = useState(8); // start od8:00
+  const [gameDay, setGameDay] = useState(1);
+  const [showMainMenu, setShowMainMenu] = useState(true);
+  const [showPauseMenu, setShowPauseMenu] = useState(false);
+  const [showOptionsOverlay, setShowOptionsOverlay] = useState(false);
+  const [canContinue, setCanContinue] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveSlots, setSaveSlots] = useState<SaveSlot[]>([]);
+  const [saveSlotsLoading, setSaveSlotsLoading] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveNameInput, setSaveNameInput] = useState('');
+  const [saveNameError, setSaveNameError] = useState<string | null>(null);
+  const [newHireName, setNewHireName] = useState('');
+  const [newHireRole, setNewHireRole] = useState<Role>('developer');
+  const [newHireLevel, setNewHireLevel] = useState<EmployeeLevel>('junior');
+  const [newHireSalary, setNewHireSalary] = useState<number>(SALARY_BY_LEVEL['junior']);
+  const [candidatePool, setCandidatePool] = useState<RecruitCandidate[]>(() => generateCandidatePool(100));
+  const [lang, setLang] = useState<Language>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = window.localStorage?.getItem('preferredLang') as Language | null;
+      if (stored === 'pl' || stored === 'en') return stored;
+    }
+    return 'pl';
+  });
+  const formatWithParams = useCallback((template: string, params?: Record<string, string | number>) => {
+    if (!params) return template;
+    return template.replace(/\{(.*?)\}/g, (_, p) => String(params[p] ?? ''));
+  }, []);
+  const t = useCallback((key: string, params?: Record<string, string | number>) => {
+    const dict = messages[lang] || messages.en;
+    const fallback = messages.en;
+    const msg = dict[key] ?? fallback[key] ?? key;
+    return formatWithParams(msg, params);
+  }, [lang, formatWithParams]);
+  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = window.localStorage?.getItem('preferredCurrency') as CurrencyCode | null;
+      if (stored && CURRENCY_PROFILES[stored]) {
+        return stored;
+      }
+    }
+    return DEFAULT_CURRENCY;
+  });
+  const currencyProfile = CURRENCY_PROFILES[currencyCode];
+  const convertMoney = useCallback(
+    (value: number, target: CurrencyCode = currencyCode) => {
+      const profile = CURRENCY_PROFILES[target] || CURRENCY_PROFILES.USD;
+      return value * profile.rate;
+    },
+    [currencyCode]
+  );
+
+  const translate = useCallback((key: string, params?: Record<string, string | number>) => {
+    const dict = messages[lang] || messages.en;
+    const fallback = messages.en;
+    let msg = dict[key] ?? fallback[key] ?? key;
+    if (params) {
+      msg = msg.replace(/\{(.*?)\}/g, (_, p) => String(params[p] ?? ''));
+    }
+    return msg;
+  }, [lang]);
+  const formatMoney = useCallback(
+    (value: number, target: CurrencyCode = currencyCode, options?: Intl.NumberFormatOptions) => {
+      const profile = CURRENCY_PROFILES[target] || CURRENCY_PROFILES.USD;
+      const formatter = new Intl.NumberFormat(profile.locale, {
+        style: 'currency',
+        currency: profile.code,
+        maximumFractionDigits: profile.code === 'JPY' ? 0 : 2,
+        minimumFractionDigits: profile.code === 'JPY' ? 0 : 2,
+        ...options,
+      });
+      return formatter.format(value * profile.rate);
+    },
+    [currencyCode]
+  );
 
   const tickManagerRef = useRef<any>(null);
   const hrRef = useRef<any>(null);
   const projectRef = useRef<any>(null);
-  const econRef = useRef<any>(null);
-  const economy = useEconomy(company, setCompany); 
-  const getCompany = () => company;
+  const econRef = useRef<EconomySystem | null>(null);
+  const lastActiveSpeedRef = useRef<number>(1000);
+  const rebuildCandidatePool = useCallback((repOverride?: number) => {
+    const rep = repOverride ?? company.reputation ?? 100;
+    setCandidatePool(generateCandidatePool(rep));
+  }, [company.reputation]);
+   const getCompany = () => company;
   const { runPayroll: backupPayroll, exportPayroll: exportPayrollIPC } = usePayrollHelpers(setCompany, getCompany, (t: any) => {
         
         pushToast(t);
     });
   
 
+  const menuTabs: { key: string; label: string; icon: IconType }[] = [
+    { key: 'contracts', label: translate('nav.contracts'), icon: HiOutlineDocumentText },
+    { key: 'projects', label: translate('nav.projects'), icon: HiOutlineSquares2X2 },
+    { key: 'employees', label: translate('nav.employees'), icon: HiOutlineUserGroup },
+    { key: 'trainings', label: translate('nav.trainings'), icon: HiOutlineAcademicCap },
+    { key: 'rnd', label: translate('nav.rnd'), icon: HiOutlineBeaker },
+    { key: 'office', label: translate('nav.office'), icon: HiOutlineBuildingOffice2 },
+    { key: 'competitors', label: translate('nav.competitors'), icon: HiOutlineTrophy },
+    { key: 'events', label: translate('nav.events'), icon: HiOutlineBolt },
+    { key: 'missions', label: translate('nav.missions'), icon: HiOutlineFlag },
+    { key: 'stats', label: translate('nav.stats'), icon: HiOutlineChartBar },
+    { key: 'finance', label: translate('nav.finance'), icon: HiOutlineBanknotes },
+    { key: 'log', label: translate('nav.log'), icon: HiOutlineClipboardDocumentList },
+  ];
 
   if (!hrRef.current) hrRef.current = new HRSystem();
   if (!projectRef.current) projectRef.current = new ProjectSystem();
   if (!econRef.current) econRef.current = new EconomySystem(company?.payrollIntervalDays || 30);
 
-  const pushToast = (t: Omit<ToastItem, 'id'>) => {
-    const id = (Date.now()).toString(36) + Math.random().toString(36).slice(2,6);
-    setToasts(s => [{ id, ...t }, ...s].slice(0, 6));
-  };
+  const pushToast = useCallback((t: Omit<ToastItem, 'id'>) => {
+     const id = (Date.now()).toString(36) + Math.random().toString(36).slice(2,6);
+     setToasts(s => [{ id, ...t }, ...s].slice(0, 6));
+  }, []);
 
-  const openConfirmation = (props:any) => {
-    setConfirmProps(props);
-  };
+  const openConfirmation = useCallback((props: any) => {
+    setConfirmProps({ ...props, open: true });
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -60,177 +424,1359 @@ const App: React.FC = () => {
 
   const pushEvent = (msg: string) => {
     const stamp = new Date().toLocaleTimeString();
-    setCompany((c:any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
+    setCompany((c: any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
   };
 
-  const tickCallback = (state: any): any => {
-    const hr = hrRef.current!;
-    const ps = projectRef.current!;
-    const econ = econRef.current!;
-    let updated = hr.tickCompany(state);
-    updated = ps.tickProjects(updated);
-    updated = econ.tickEconomy(updated);
+  const pushProjectEvent = (msg: string) => {
+    const stamp = new Date().toLocaleTimeString();
+    setCompany((c: any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
+  };
 
-    const empIncome = (updated.employees || []).reduce((acc:number, e:any) => {
-      if ((e as any).onBreak) return acc;
-      return acc + (e.productivity || 0);
-    }, 0);
-    updated.funds = +( (updated.funds || 0) + empIncome ).toFixed(2);
-    updated.day = (updated.day || 0) + 1;
-
-    if ((updated.funds || 0) < -1000) {
-      try { tickManagerRef.current?.stop(); } catch(e){}
-      setBankruptOpen(true);
-      pushToast({ type:'warning', title:'Bankruptcy', message:'Funds critically low, paused' });
+  const validateSaveName = useCallback((value: string) => {
+    if (!value || !value.trim()) return t('saves.nameRequired');
+    if (!SAVE_NAME_REGEX.test(value.trim())) {
+      return t('saves.nameInvalid');
     }
+    return null;
+  }, [t]);
 
+  const handleSaveNameChange = (value: string) => {
+    setSaveNameInput(value);
+    if (!value) {
+      setSaveNameError(null);
+      return;
+    }
+    setSaveNameError(validateSaveName(value.trim()));
+  };
+
+  const readLocalSaves = useCallback((): SaveSlot[] => {
+    if (typeof window === 'undefined' || !window.localStorage) return [];
+    return Object.keys(window.localStorage)
+      .filter(key => key.startsWith('save_'))
+      .map(key => {
+        const raw = window.localStorage.getItem(key);
+        let updatedAt: number | undefined;
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed?.lastSavedAt) {
+              const ts = Date.parse(parsed.lastSavedAt);
+              if (!Number.isNaN(ts)) updatedAt = ts;
+            }
+          } catch (err) {
+            console.warn('Invalid save payload', err);
+          }
+        }
+        return { name: key.replace('save_', ''), updatedAt, size: raw?.length, source: 'local' as const };
+      });
+  }, []);
+
+  const fetchSaveSlots = useCallback(async () => {
+    setSaveSlotsLoading(true);
+    try {
+      if (window.electronAPI?.listSaves) {
+        const res = await window.electronAPI.listSaves();
+        if (!res?.success) throw new Error(res?.error || 'Failed to list saves');
+        const slots = (res.data || []).map(slot => ({ ...slot, source: 'fs' as const }));
+        setSaveSlots(slots);
+      } else {
+        setSaveSlots(readLocalSaves());
+      }
+    } catch (err: any) {
+      console.error('List saves error', err);
+      pushToast({ type: 'error', message: t('saves.fetchFailed') });
+    } finally {
+      setSaveSlotsLoading(false);
+    }
+  }, [pushToast, readLocalSaves, t]);
+  
+  // Efekty ulepszeń na produktywność/morale (w tickCallback)
+  const applyOfficeEffects = (state: any) => {
+ let updated = { ...state };
+ (updated.offices || []).forEach((office: any) => {
+ if (!office.owned) return;
+ (office.desks || []).forEach((desk: any) => {
+ if (!desk.assignedEmployeeId) return;
+ const emp = (updated.employees || []).find((e: any) => e.id === desk.assignedEmployeeId);
+ if (!emp) return;
+ (desk.upgrades || []).forEach((upg: any) => {
+ if (upg.effect?.productivity) emp.productivity += upg.effect.productivity;
+ if (upg.effect?.morale) emp.morale += upg.effect.morale;
+ });
+ });
+ });
+ return updated;
+};
+
+  // System awansów: pracownicy zdobywają doświadczenie, mogą awansować
+  function processPromotions(state: any) {
+    let updated = { ...state };
+    updated.employees = (updated.employees || []).map((e: any) => {
+      let exp = e.experience ||0;
+      exp +=1; // zdobywaj exp co tick
+      let level = e.level;
+      let prod = e.productivity;
+      let morale = e.morale;
+      let salary = e.salary;
+      if (exp >=50 && level === 'junior') {
+        level = 'mid'; prod +=10; morale +=5; salary +=100;
+        updated.events = [`${new Date().toLocaleTimeString()} — PROMOTION: ${e.name} awansował na mid!`, ...(updated.events || [])];
+      }
+      if (exp >=120 && level === 'mid') {
+        level = 'senior'; prod +=15; morale +=10; salary +=200;
+        updated.events = [`${new Date().toLocaleTimeString()} — PROMOTION: ${e.name} awansował na senior!`, ...(updated.events || [])];
+      }
+      return { ...e, experience: exp, level, productivity: prod, morale, salary };
+    });
+    return updated;
+  }
+
+  useEffect(() => {
+    if (tickManagerRef.current) return;
+    const manager = new TickManager((prev: CompanyState) => {
+      let next = { ...prev };
+      next.day = (next.day || 0) + 1;
+      next = hrRef.current ? hrRef.current.tickCompany(next) : next;
+      next = projectRef.current ? projectRef.current.tickProjects(next) : next;
+      next = econRef.current ? econRef.current.tickEconomy(next) : next;
+      next = applyOfficeEffects(next);
+      next = processPromotions(next);
+      return next;
+    }, tickSpeed);
+    tickManagerRef.current = manager;
+    manager.start((updater) => setCompany(updater));
+    return () => manager.stop();
+  }, [setCompany]);
+
+  useEffect(() => {
+    if (tickSpeed > 0) {
+      lastActiveSpeedRef.current = tickSpeed;
+    }
+  }, [tickSpeed]);
+ 
+   // sort & filter projects
+  const filteredSortedProjects = (company.projects || [])
+    .filter((p: any) => filterStatus === 'all' || p.status === filterStatus)
+    .sort((a: any, b: any) => {
+      if (sortKey === 'name') return a.name.localeCompare(b.name);
+      if (sortKey === 'status') return (a.status || '').localeCompare(b.status || '');
+      if (sortKey === 'createdAt') return (a.createdAt || '').localeCompare(b.createdAt || '');
+      return 0;
+    });
+
+  const filteredSortedContracts = (company.contracts || [])
+    // .filter((p: any) => filterStatus === 'all' || p.status === filterStatus)
+    // .sort((a: any, b: any) => {
+    //   if (sortKey === 'name') return a.name.localeCompare(b.name);
+    //   if (sortKey === 'status' ) return (a.status || '').localeCompare(b.status || '');
+    //   if (sortKey === 'createdAt' ) return (a.createdAt || '').localeCompare(b.createdAt || '');
+    //   return 0;
+    // });
+
+  const renderContractsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.contracts')}</h2>
+      </div>
+      <ContractsPanel
+        contracts={company.contracts || []}
+        onAccept={handleAcceptContract}
+        onRefreshOffers={handleManualContractRefresh}
+        refreshCost={CONTRACT_MANUAL_REFRESH_COST}
+        canRefresh={(company.funds || 0) >= CONTRACT_MANUAL_REFRESH_COST}
+        darkMode={darkMode}
+        currentDay={company.day || 1}
+      />
+    </section>
+  );
+
+  const renderProjectsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.projects')}</h2>
+        <button className="accent" onClick={() => setShowAddProject(true)}>{t('projects.addButton')}</button>
+      </div>
+      <div className="panel-stack">
+        {filteredSortedProjects.map((project: Project) => (
+          <ProjectRowEnhanced
+            key={project.id}
+            project={project}
+            employees={company.employees || []}
+            onAssignSpecific={(pid, empId) => assignToProject(pid, empId)}
+            onUnassign={(pid) => unassignLastFromProject(pid)}
+            onDropEmployee={(pid, empId) => assignToProject(pid, empId)}
+          />
+        ))}
+      </div>
+      {filteredSortedProjects.length === 0 && <div className="empty-state">{t('projects.empty')}</div>}
+      {showAddProject && (
+        <div className="sub-panel">
+           <h3>{t('projects.newTitle')}</h3>
+           <div className="form-grid">
+             <label>{t('projects.form.name')}</label>
+             <input value={newProject.name} onChange={(e) => setNewProject({ ...newProject, name: e.target.value })} />
+             <label>{t('projects.form.description')}</label>
+             <textarea value={newProject.description} onChange={(e) => setNewProject({ ...newProject, description: e.target.value })} />
+             <label>{t('projects.form.effort')}</label>
+             <input
+               type="number"
+               min={10}
+               value={newProject.effort}
+               onChange={(e) => setNewProject({ ...newProject, effort: Number(e.target.value) })}
+             />
+             <label>{t('projects.form.reward')}</label>
+             <input
+               type="number"
+               min={100}
+               value={newProject.reward}
+               onChange={(e) => setNewProject({ ...newProject, reward: Number(e.target.value) })}
+             />
+             <label>{t('projects.form.roles')}</label>
+             <div className="chip-row">
+               {ROLE_OPTIONS.map((role) => {
+                 const selected = newProject.requiredRoles.includes(role);
+                 return (
+                   <button
+                     key={role}
+                     type="button"
+                     className={selected ? 'chip selected' : 'chip'}
+                     onClick={() => {
+                       const roles = selected
+                         ? newProject.requiredRoles.filter((r) => r !== role)
+                         : [...newProject.requiredRoles, role];
+                       setNewProject({ ...newProject, requiredRoles: roles });
+                     }}
+                   >
+                     {role}
+                   </button>
+                 );
+               })}
+             </div>
+           </div>
+           <div className="actions">
+             <button className="primary" onClick={handleCreateProject}>{t('projects.create')}</button>
+             <button className="btn-outline" onClick={handleCancelAddProject}>{t('confirm.cancel')}</button>
+           </div>
+         </div>
+       )}
+    </section>
+  );
+
+  const renderEmployeesTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.employees')}</h2>
+      </div>
+      <div className="sub-panel">
+        <div className="panel-header">
+          <h3>{t('employees.hire.title')}</h3>
+        </div>
+        <div className="input-cluster">
+          <input
+            type="text"
+            placeholder={t('employees.hire.placeholder')}
+            value={newHireName}
+            onChange={e => setNewHireName(e.target.value)}
+          />
+          <select
+            value={newHireRole}
+            onChange={e => setNewHireRole(e.target.value as Role)}
+          >
+             {ROLE_OPTIONS.map(role => (
+               <option key={role} value={role}>{role}</option>
+             ))}
+           </select>
+           <select
+             value={newHireLevel}
+             onChange={e => {
+               const level = e.target.value as EmployeeLevel;
+               setNewHireLevel(level);
+               setNewHireSalary(SALARY_BY_LEVEL[level]);
+             }}
+           >
+             {LEVEL_OPTIONS.map(level => (
+               <option key={level} value={level}>{level}</option>
+             ))}
+           </select>
+           <input
+             type="number"
+             min={100}
+             value={newHireSalary}
+             onChange={e => setNewHireSalary(Number(e.target.value))}
+           />
+            <button className="primary" onClick={handleHireSubmit}>{t('employees.hire.submit')}</button>
+         </div>
+          <small className="muted">{t('employees.hire.hint')}</small>
+      </div>
+      <div className="recruitment-board">
+        <div className="panel-header">
+            <h3>{t('employees.recruitment.title')}</h3>
+           <button
+             className="btn-outline"
+             onClick={handleRefreshCandidates}
+             disabled={(company.funds || 0) < CANDIDATE_REFRESH_COST}
+              title={(company.funds || 0) < CANDIDATE_REFRESH_COST ? t('employees.recruitment.refreshTooltip') : undefined}
+           >
+              {t('employees.recruitment.refresh', { cost: formatMoney(CANDIDATE_REFRESH_COST) })}
+           </button>
+         </div>
+         {candidatePool.length === 0 ? (
+            <div className="muted">{t('employees.recruitment.empty')}</div>
+         ) : (
+           <div className="candidate-grid">
+             {candidatePool.map(candidate => {
+               const canHire = (company.funds || 0) >= candidate.hiringCost;
+               return (
+                 <div key={candidate.id} className="candidate-card">
+                   <div className="candidate-card__head">
+                     <div>
+                       <strong>{candidate.name}</strong>
+                       <div className="candidate-card__role">{candidate.role} • {candidate.level}</div>
+                     </div>
+                    <div style={{ fontSize: 12, opacity: 0.8 }}>{t('employees.recruitment.skill')} {candidate.baseSkill}</div>
+                   </div>
+                   <div className="candidate-card__meta">
+                    <span>{t('employees.recruitment.expectedSalary')}: {formatMoney(candidate.salary)}</span>
+                    <span>{t('employees.recruitment.hiringCost')}: {formatMoney(candidate.hiringCost)}</span>
+                   </div>
+                   <div className="candidate-card__trait">
+                    <strong>{t(`traits.${candidate.trait.key}.label`, { label: candidate.trait.label })}</strong> — {t(`traits.${candidate.trait.key}.description`, { description: candidate.trait.description })}
+                   </div>
+                   <button
+                     disabled={!canHire}
+                     onClick={() => handleHireCandidate(candidate.id)}
+                    title={!canHire ? t('employees.recruitment.refreshTooltip') : undefined}
+                   >
+                    {t('employees.recruitment.hireFor', { amount: formatMoney(candidate.hiringCost) })}
+                   </button>
+                 </div>
+               );
+             })}
+           </div>
+         )}
+       </div>
+       <EmployeesList employees={company.employees || []} />
+     </section>
+   );
+
+  const renderTrainingsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.trainings')}</h2>
+      </div>
+      <ErrorBoundary>
+        <TrainingsPanel trainings={company.trainings || []} employees={company.employees || []} onStart={handleStartTraining} darkMode={darkMode} />
+      </ErrorBoundary>
+    </section>
+  );
+
+  const renderResearchTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.rnd')}</h2>
+      </div>
+      <ResearchPanel researches={company.researches || []} onStart={handleStartResearch} onInvest={handleInvestResearch} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderFinanceTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.finance')}</h2>
+      </div>
+      <FinancePanel
+        company={company}
+        nextPayoutDays={econRef.current?.nextPayoutInDays?.(company) ?? 0}
+        runPayrollNow={runPayrollNow}
+        exportPayroll={exportPayrollIPC}
+        updateSalary={updateSalary}
+        openConfirmation={openConfirmation}
+        darkMode={darkMode}
+        onChangeInterval={handleChangePayrollInterval}
+      />
+    </section>
+  );
+
+  const renderLogTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.log')}</h2>
+      </div>
+      <EventLog events={(company.events || [])} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderCompetitorsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.competitors')}</h2>
+      </div>
+      <CompetitorsPanel competitors={company.competitors || []} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderMissionsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.missions')}</h2>
+      </div>
+      <MissionsPanel missions={company.missions || []} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderStatsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.stats')}</h2>
+      </div>
+      <StatsPanel employees={company.employees || []} company={company} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderEventsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>{t('nav.events')}</h2>
+      </div>
+      <GameEventsPanel events={company.gameEvents || []} darkMode={darkMode} />
+    </section>
+  );
+ 
+   const renderOfficeTab = () => (
+     <>
+      <section className="panel-card">
+        <div className="panel-header">
+          <h2>{t('office.mapTitle')}</h2>
+        </div>
+        <OfficeMap offices={company.offices || []} employees={company.employees || []} onRent={handleRentOffice} onAssignDesk={handleAssignDesk} darkMode={darkMode} />
+      </section>
+      <section className="panel-card">
+        <OfficePanel
+          offices={company.offices || []}
+          employees={company.employees || []}
+          onRent={handleRentOffice}
+          onAssignDesk={handleAssignDesk}
+          onUpgradeDesk={handleUpgradeDesk}
+          darkMode={darkMode}
+        />
+      </section>
+    </>
+  );
+ 
+   const renderActiveTab = () => {
+     switch (activeTab) {
+      case 'contracts':
+        return renderContractsTab();
+      case 'projects':
+        return renderProjectsTab();
+      case 'employees':
+        return renderEmployeesTab();
+      case 'trainings':
+        return renderTrainingsTab();
+      case 'rnd':
+        return renderResearchTab();
+      case 'finance':
+        return renderFinanceTab();
+      case 'log':
+        return renderLogTab();
+      case 'office':
+        return renderOfficeTab();
+      case 'competitors':
+        return renderCompetitorsTab();
+      case 'events':
+        return renderEventsTab();
+      case 'missions':
+        return renderMissionsTab();
+      case 'stats':
+        return renderStatsTab();
+      default:
+        return null;
+    }
+  };
+
+  const handlePause = () => {
+    setTickSpeed(0);
+    tickManagerRef.current?.stop();
+  };
+  const handleNormal = () => {
+    setTickSpeed(1000);
+  };
+  const handleMedium = () => {
+    setTickSpeed(333);
+  };
+  const handleFast = () => {
+    setTickSpeed(200);
+  };
+  const handleStart = () => {
+    if (tickManagerRef.current) {
+      setTickSpeed(1000); // domyślna prędkość
+      tickManagerRef.current.stop();
+      tickManagerRef.current.start((s: any) => {
+        setCompany(s);
+      });
+    }
+  };
+
+  const openPauseMenu = useCallback(() => {
+    if (showMainMenu || showPauseMenu) return;
+    if (tickSpeed > 0) {
+      lastActiveSpeedRef.current = tickSpeed;
+    }
+    setTickSpeed(0);
+    tickManagerRef.current?.stop();
+    setShowPauseMenu(true);
+  }, [showMainMenu, showPauseMenu, tickSpeed])
+
+  const resumeFromPause = useCallback(() => {
+    if (!showPauseMenu) return;
+    setShowPauseMenu(false);
+    const resumeSpeed = lastActiveSpeedRef.current || 1000;
+    setTickSpeed(resumeSpeed);
+    if (tickManagerRef.current && resumeSpeed > 0) {
+      tickManagerRef.current.setTickRate(resumeSpeed, (s: any) => setCompany(s));
+      tickManagerRef.current.start((s: any) => setCompany(s));
+    }
+  }, [showPauseMenu, setCompany]);
+  
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+
+      const activeElement = document.activeElement as HTMLElement | null;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (showOptionsOverlay) {
+        event.preventDefault();
+        setShowOptionsOverlay(false);
+        return;
+      }
+
+      if (showMainMenu) {
+        return;
+      }
+
+      event.preventDefault();
+      if (showPauseMenu) {
+        resumeFromPause();
+      } else {
+        openPauseMenu();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [showMainMenu, showPauseMenu, showOptionsOverlay, openPauseMenu, resumeFromPause]);
+ 
+   const handleSaveGame = async () => {
+    if (typeof window === 'undefined') return;
+    const saveName = window.prompt('Enter save name', 'autosave');
+    if (!saveName) return;
+    await persistSave(saveName);
+  };
+
+  const handleLoadGame = async (presetName?: string, options?: { silent?: boolean }): Promise<boolean> => {
+    if (typeof window === 'undefined') return false;
+    let saveName = presetName;
+    if (!saveName) {
+      if (options?.silent) return false;
+      const promptResult = window.prompt('Enter save name to load', 'autosave');
+      if (!promptResult) return false;
+      saveName = promptResult;
+    }
+    try {
+      let data: string | null = null;
+      if (window.electronAPI?.loadFile) {
+        const res = await window.electronAPI.loadFile(saveName);
+        if (!res?.success) throw new Error(res?.error || 'Unknown error');
+        data = typeof res.data === 'string' ? res.data : null;
+      } else {
+        data = localStorage.getItem(`save_${saveName}`);
+      }
+      if (!data) throw new Error('Save not found');
+      const parsed = JSON.parse(data);
+      const normalized = normalizeCompanyState(parsed);
+      const needsContracts = !(normalized.contracts || []).some((c: any) => c.status === 'available' || c.status === 'locked');
+      const hydrated = needsContracts ? refreshContracts(normalized, true) : normalized;
+      setCompany(hydrated);
+      setCanContinue(true);
+      rebuildCandidatePool(hydrated.reputation ?? 100);
+      if (!options?.silent) {
+        pushToast({ type: 'success', message: `Game loaded: ${saveName}` });
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Load game error', err);
+      if (!options?.silent) {
+        pushToast({ type: 'error', message: `Load failed: ${err?.message || err}` });
+      }
+      return false;
+    }
+  };
+
+  const handleDeleteSave = async (slot: SaveSlot) => {
+    if (slot.source === 'local') {
+      localStorage.removeItem(`save_${slot.name}`);
+      pushToast({ type: 'success', message: `Save deleted: ${slot.name}` });
+      fetchSaveSlots();
+    } else {
+      if (!window.electronAPI?.deleteSave) return;
+      const res = await window.electronAPI.deleteSave(slot.name);
+      if (res?.success) {
+        pushToast({ type: 'success', message: t('saves.deleted', { name: slot.name }) });
+        fetchSaveSlots();
+      } else {
+        pushToast({ type: 'error', message: t('saves.deleteFailed', { error: res?.error || t('saves.unknown') }) });
+      }
+    }
+  };
+
+  const handleStartNewGame = () => {
+    const freshState = refreshContracts(createEmptyCompany(), true);
+    setCompany(freshState);
+    rebuildCandidatePool(freshState.reputation ?? 100);
+    setShowMainMenu(false);
+    setShowPauseMenu(false);
+    setActiveTab('contracts');
+    setCanContinue(false);
+    pushToast({ type: 'success', message: t('game.new.started') });
+  };
+
+  const handleContinue = async () => {
+    const success = await handleLoadGame('autosave', { silent: true });
+    if (success) {
+      setShowMainMenu(false);
+    } else {
+      pushToast({ type: 'error', message: t('game.autosaveMissing') });
+    }
+  };
+
+  const handleNewGameConfirmation = () => {
+    setConfirmProps({
+      open: true,
+      title: t('game.new.confirmTitle'),
+      body: t('game.new.confirmBody'),
+      onConfirm: () => {
+        setConfirmProps(null);
+        handleStartNewGame();
+      },
+    });
+  };
+
+  const handleAcceptContract = (contractId: string) => {
+    let acceptedName: string | null = null;
+    setCompany((current: any) => {
+      let updated = false;
+      const updatedContracts = (current.contracts || []).map((c: any) => {
+        if (c.id === contractId && c.status === 'available') {
+          updated = true;
+          acceptedName = c.name;
+          return { ...c, status: 'active', employees: [], startedAt: current.day };
+        }
+        return c;
+      });
+      return updated ? { ...current, contracts: updatedContracts } : current;
+    });
+    if (acceptedName) {
+      pushToast({ type: 'success', message: t('contracts.acceptedToast', { name: acceptedName }) });
+    } else {
+      pushToast({ type: 'error', message: t('contracts.unavailableToast') });
+    }
+  };
+
+  const handleManualContractRefresh = () => {
+    let refreshed = false;
+    setCompany((current: any) => {
+      const funds = current?.funds ?? 0;
+      if (funds < CONTRACT_MANUAL_REFRESH_COST) {
+        return current;
+      }
+      refreshed = true;
+      const stateAfterPayment = {
+        ...current,
+        funds: +(funds - CONTRACT_MANUAL_REFRESH_COST).toFixed(2),
+      };
+      const refreshedState = refreshContracts(stateAfterPayment, true);
+      const currentDay = current?.day || 1;
+      return {
+        ...refreshedState,
+        lastContractRefreshDay: currentDay,
+        nextContractRefreshDay: currentDay + CONTRACT_REFRESH_COOLDOWN_DAYS,
+      };
+    });
+    pushToast(
+      refreshed
+        ? { type: 'success', message: t('contracts.refreshSuccess') }
+        : { type: 'error', message: t('contracts.refreshError') }
+    );
+  };
+
+  const runPayrollNow = () => {
+    backupPayroll();
+    pushToast({ type: 'info', message: t('finance.payrollProcessed') });
+  };
+
+  const handleChangePayrollInterval = useCallback(
+    (days: number) => {
+      const sanitized = Math.max(1, Math.round(days));
+      if (econRef.current) {
+        econRef.current.payoutIntervalDays = sanitized;
+      } else {
+        econRef.current = new EconomySystem(sanitized);
+      }
+      setCompany((current: CompanyState) => ({ ...current, payrollIntervalDays: sanitized }));
+      pushToast({ type: 'success', message: t('finance.intervalSet', { days: sanitized }) });
+    },
+    [pushToast, setCompany]
+  );
+ 
+   const updateSalary = (employeeId: string, newSalary: number) => {
+     setCompany((current: any) => {
+       const employees = (current.employees || []).map((e: any) => {
+         if (e.id === employeeId) {
+           return { ...e, salary: newSalary };
+         }
+         return e;
+       });
+       return { ...current, employees };
+     });
+    pushToast({ type: 'success', message: t('finance.salaryUpdated') });
+   };
+
+  const refreshContracts = (state: any, withLog = false) => {
+    const updated = { ...state };
+    const newContracts = generateContractsBatch(state);
+    updated.contracts = [...(state.contracts || []).filter((c: any) => c.status !== 'active'), ...newContracts];
+    if (withLog) {
+      const contractNames = newContracts.map((c: any) => c.name).join(', ');
+      updated.events = [`${new Date().toLocaleTimeString()} — ${t('contracts.log.new', { names: contractNames })}`, ...(state.events || [])];
+    }
     return updated;
   };
 
-  useEffect(() => {
-    tickManagerRef.current = new TickManager(tickCallback, 1000);
-    return () => tickManagerRef.current?.stop();
-  }, []);
-
-  const hire = (name='Dev', role:'developer'|'designer'|'marketer'|'researcher'='developer', level='junior', skill=50, salary=160) => {
-    const hr = hrRef.current!;
-    const emp = hr.hireEmployee(name, role as any, level as any, skill);
-    (emp as any).salary = salary;
-    setCompany((c:any) => ({ ...c, employees: [...(c.employees||[]), emp] }));
-    pushToast({ type:'success', title:'Hire', message:`${emp.name} hired` });
+  const handleStartTraining = (trainingId: string, employeeId: string) => {
+    let feedback: { type: ToastItem['type']; message: string } | null = null;
+    setCompany((current) => {
+      const trainings = [...(current.trainings || [])];
+      const employees = [...(current.employees || [])];
+      const trainingIndex = trainings.findIndex((t) => t.id === trainingId);
+      if (trainingIndex === -1) {
+        feedback = { type: 'error', message: t('trainings.toast.notFound') };
+        return current;
+      }
+      const training = trainings[trainingIndex];
+      if (training.status !== 'available') {
+        feedback = { type: 'error', message: t('trainings.toast.already') };
+        return current;
+      }
+      const employeeIndex = employees.findIndex((e) => e.id === employeeId);
+      if (employeeIndex === -1) {
+        feedback = { type: 'error', message: t('employees.toast.unavailable') };
+        return current;
+      }
+      const employee = employees[employeeIndex];
+      if (employee.onTraining) {
+        feedback = { type: 'error', message: t('trainings.toast.alreadyEmployee', { name: employee.name }) };
+        return current;
+      }
+      const funds = current.funds ?? 0;
+      if (funds < training.cost) {
+        feedback = { type: 'error', message: t('trainings.toast.noFunds') };
+        return current;
+      }
+      const nowIso = new Date().toISOString();
+      const startedDay = current.day ?? 1;
+      trainings[trainingIndex] = {
+        ...training,
+        status: 'completed',
+        assignedEmployeeId: employeeId,
+        startedAt: nowIso,
+        startedDay,
+        completedAt: nowIso,
+        completedDay: startedDay,
+        progress: 1,
+      };
+      employees[employeeIndex] = applyTrainingToEmployee(employee, training);
+      feedback = { type: 'success', message: t('trainings.toast.completed', { name: employee.name, training: training.name }) };
+      return {
+        ...current,
+        trainings,
+        employees,
+        funds: +(funds - training.cost).toFixed(2),
+      };
+    });
+    if (feedback) {
+      pushToast(feedback);
+      if (feedback.type === 'success') {
+        pushEvent(feedback.message);
+      }
+    }
   };
 
-  const assignToProject = (projectId:string, employeeId?:string) => {
-    const p = (company.projects||[]).find((x:any)=>x.id===projectId);
-    if (!p) return;
-    if (employeeId) {
-      const emp = company.employees.find((e:any)=> e.id === employeeId);
-      if (!emp) { pushToast({ type:'error', message:'Employee not found' }); return; }
-      if ((p.assignees||[]).includes(employeeId)) { pushToast({ type:'warning', message:'Already assigned' }); return; }
-      setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), employeeId]}: pr) }));
-      pushToast({ type:'info', message: `${emp.name} assigned` });
+  const handleStartResearch = (researchId: string) => {
+    let feedback: { type: ToastItem['type']; message: string } | null = null;
+    setCompany((current) => {
+      const researches = [...(current.researches || [])];
+      const index = researches.findIndex((r) => r.id === researchId);
+      if (index === -1) {
+        feedback = { type: 'error', message: t('research.toast.notFound') };
+        return current;
+      }
+      const research = researches[index];
+      if (research.status !== 'available') {
+        feedback = { type: 'error', message: t('research.toast.already') };
+        return current;
+      }
+      researches[index] = {
+        ...research,
+        status: 'in_progress',
+        startedDay: current.day ?? 1,
+        progress: 0,
+        invested: false,
+      };
+      feedback = { type: 'success', message: t('research.toast.started', { name: research.name }) };
+      return { ...current, researches };
+    });
+    if (feedback) {
+      pushToast(feedback);
+      if (feedback.type === 'success') {
+        pushEvent(feedback.message);
+      }
+    }
+  };
+
+  const handleInvestResearch = (researchId: string) => {
+    setCompany((current) => {
+      const researches = [...(current.researches || [])];
+      const index = researches.findIndex((r) => r.id === researchId);
+      if (index === -1) {
+        return current;
+      }
+      const research = researches[index];
+      const funds = current.funds ?? 0;
+      const cost = research.nextStageCost ?? 0;
+      if (funds < cost) {
+        pushToast({ type: 'error', message: t('research.toast.noFunds') });
+        return current;
+      }
+      researches[index] = {
+        ...research,
+        invested: true,
+        status: 'available',
+        nextStageCost: Math.round(cost * 1.5),
+      };
+      pushToast({ type: 'success', message: t('research.toast.invested', { name: research.name }) });
+      return { ...current, researches, funds: funds - cost };
+    });
+  };
+
+  const persistSave = useCallback(async (saveName: string) => {
+    const trimmed = saveName?.trim();
+    if (!trimmed) {
+      pushToast({ type: 'error', message: t('saves.nameRequired') });
+      return false;
+    }
+    const payload = JSON.stringify({
+      ...company,
+      lastSavedAt: new Date().toISOString(),
+      saveVersion: SAVE_VERSION,
+    });
+    try {
+      if (window.electronAPI?.saveFile) {
+        const res = await window.electronAPI.saveFile(trimmed, payload);
+        if (!res?.success) throw new Error(res?.error || t('saves.unknown'));
+      } else {
+        localStorage.setItem(`save_${trimmed}`, payload);
+      }
+      if (trimmed === 'autosave') setCanContinue(true);
+      pushToast({ type: 'success', message: t('saves.saved', { name: trimmed }) });
+      return true;
+    } catch (err: any) {
+      console.error('Save error', err);
+      pushToast({ type: 'error', message: t('saves.saveFailed', { error: err?.message || err }) });
+      return false;
+    }
+  }, [company, pushToast, setCanContinue]);
+
+  const handleHireSubmit = useCallback(() => {
+    const name = newHireName.trim() || randomEmployeeName();
+    const skillValue = clampSkill(SKILL_BY_LEVEL[newHireLevel] + Math.round(Math.random() * 10 - 5));
+    let employee: Employee;
+    if (hrRef.current?.hireEmployee) {
+      employee = hrRef.current.hireEmployee(name, newHireRole, newHireLevel, skillValue);
+    } else {
+      const skills: Skills = { coding: 30, design: 30, marketing: 30, research: 30 };
+      const key = ROLE_SKILL_MAP[newHireRole];
+      skills[key] = skillValue;
+      employee = {
+        id: 'emp_' + Date.now().toString(36),
+        name,
+        role: newHireRole,
+        level: newHireLevel,
+        skills,
+        morale: 70,
+        fatigue: 10,
+        productivity: Math.max(1, skillValue / 2),
+        salary: newHireSalary,
+        workPace: 'normal',
+      };
+    }
+    employee = { ...employee, salary: newHireSalary, workPace: employee.workPace || 'normal' };
+    setCompany((current: CompanyState) => ({
+      ...current,
+      employees: [...(current.employees || []), employee],
+    }));
+    setNewHireName('');
+    pushToast({ type: 'success', message: t('employees.toast.hired', { name, role: newHireRole }) });
+  }, [newHireLevel, newHireName, newHireRole, newHireSalary, pushToast, setCompany]);
+
+  const handleRefreshCandidates = useCallback(() => {
+    if ((company.funds || 0) < CANDIDATE_REFRESH_COST) {
+      pushToast({ type: 'error', message: t('employees.recruitment.refreshTooltip') });
       return;
     }
-    const free = (company.employees||[]).find((e:any)=> !(p.assignees||[]).includes(e.id));
-    if (!free) { pushToast({ type:'warning', message:'No free employee' }); return; }
-    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), free.id]}: pr) }));
-    pushToast({ type:'info', message: `${free.name} auto-assigned` });
-  };
+    setCompany((current: CompanyState) => ({
+      ...current,
+      funds: +(((current.funds || 0) - CANDIDATE_REFRESH_COST).toFixed(2)),
+    }));
+    rebuildCandidatePool();
+    pushToast({ type: 'success', message: t('employees.recruitment.refreshed') });
+  }, [company.funds, pushToast, rebuildCandidatePool, setCompany]);
 
-  const unassignSpecific = (projectId:string, employeeId:string) => {
-    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: (pr.assignees||[]).filter((x:any)=> x!==employeeId)}: pr) }));
-  };
+  const handleHireCandidate = useCallback((candidateId: string) => {
+    const candidate = candidatePool.find((c) => c.id === candidateId);
+    if (!candidate) return;
+    if ((company.funds || 0) < candidate.hiringCost) {
+      pushToast({ type: 'error', message: t('employees.recruitment.noFunds') });
+      return;
+    }
+    const skills: Skills = { coding: 35, design: 35, marketing: 35, research: 35 };
+    const key = ROLE_SKILL_MAP[candidate.role];
+    skills[key] = candidate.baseSkill;
+    let employee: Employee;
+    if (hrRef.current?.hireEmployee) {
+      employee = hrRef.current.hireEmployee(candidate.name, candidate.role, candidate.level, candidate.baseSkill);
+    } else {
+      employee = {
+        id: 'emp_' + Date.now().toString(36),
+        name: candidate.name,
+        role: candidate.role,
+        level: candidate.level,
+        skills,
+        morale: 70,
+        fatigue: 10,
+        productivity: Math.max(1, candidate.baseSkill / 2),
+        salary: candidate.salary,
+        workPace: 'normal',
+      };
+    }
+    employee = { ...employee, salary: candidate.salary };
+    const withTrait = applyTraitToEmployee(employee, candidate.trait);
+    setCompany((current: CompanyState) => ({
+      ...current,
+      employees: [...(current.employees || []), withTrait],
+      funds: +(((current.funds || 0) - candidate.hiringCost).toFixed(2)),
+    }));
+    setCandidatePool((prev) => prev.filter((c) => c.id !== candidateId));
+    pushToast({ type: 'success', message: t('employees.recruitment.hired', { name: candidate.name, role: candidate.role }) });
+  }, [candidatePool, company.funds, pushToast, setCompany, t]);
 
-  const fastForward = (n:number) => {
-    if (!tickManagerRef.current) return;
-    const snapshot = ('structuredClone' in window) ? (window as any).structuredClone(company) : JSON.parse(JSON.stringify(company));
-    const res = tickManagerRef.current.runNTicks(snapshot, n);
-    setCompany(res);
-  };
+  const assignToProject = useCallback((projectId: string, employeeId: string) => {
+    if (!employeeId) return;
+    setCompany((current: CompanyState) => {
+      if (!(current.employees || []).some((e) => e.id === employeeId)) return current;
+      const projects = (current.projects || []).map((project) => {
+        if (project.id !== projectId) return project;
+        const assignees = Array.isArray(project.assignees) ? project.assignees : [];
+        if (assignees.includes(employeeId)) return project;
+        return { ...project, assignees: [...assignees, employeeId], status: project.status ?? 'active' };
+      });
+      return { ...current, projects };
+    });
+  }, [setCompany]);
 
-    const runPayrollNow = () => {
-        // use economy hook to run payroll (this will update company via setCompany)
-        const res = economy.runPayrollNow();
-        // start autosave/backup/export tasks
-        try { backupPayroll(); } catch (e) { /* ignore */ }
-        // open bankruptcy modal if needed
-        if ((res?.funds || 0) < -1000) setBankruptOpen(true);
-    };
+  const unassignLastFromProject = useCallback((projectId: string) => {
+    setCompany((current: CompanyState) => {
+      const projects = (current.projects || []).map((project) => {
+        if (project.id !== projectId) return project;
+        const assignees = Array.isArray(project.assignees) ? [...project.assignees] : [];
+        assignees.pop();
+        return { ...project, assignees };
+      });
+      return { ...current, projects };
+    });
+  }, [setCompany]);
 
+  const handleRentOffice = useCallback((officeId: String) => {
+    const target = (company.offices || []).find((office) => office.id === officeId);
+    if (!target) return;
+    if (target.owned) {
+      pushToast({ type: 'info', message: t('office.toast.alreadyActive', { name: target.name }) });
+      return;
+    }
+    if ((company.funds || 0) < target.rent) {
+      pushToast({ type: 'error', message: t('office.toast.noFunds') });
+      return;
+    }
+    setCompany((current: CompanyState) => {
+      const offices = (current.offices || []).map((office) =>
+        office.id === officeId ? { ...office, owned: true } : office
+      );
+      return {
+        ...current,
+        offices,
+        funds: +(((current.funds || 0) - target.rent).toFixed(2)),
+      };
+    });
+    pushToast({ type: 'success', message: t('office.toast.rented', { name: target.name }) });
+  }, [company.funds, company.offices, pushToast, setCompany, t]);
 
-    const exportPayroll = () => {
-        // delegate to payroll helper which handles IPC and toasts
-        exportPayrollIPC();
-    };
+  const handleAssignDesk = useCallback((officeId: string, deskId: string, employeeId: string) => {
+    setCompany((current: CompanyState) => {
+      const offices = (current.offices || []).map((office) => {
+        if (office.id !== officeId) return office;
+        const desks = (office.desks || []).map((desk) =>
+          desk.id === deskId ? { ...desk, assignedEmployeeId: employeeId || undefined } : desk
+        );
+        return { ...office, desks };
+      });
+      return { ...current, offices };
+    });
+  }, [setCompany]);
 
+  const handleUpgradeDesk = useCallback((officeId: string, deskId: string, upgradeId: string) => {
+    setCompany((current: CompanyState) => {
+      const offices = (current.offices || []).map((office) => {
+        if (office.id !== officeId) return office;
+        const desks = (office.desks || []).map((desk) => {
+          if (desk.id !== deskId) return desk;
+          const upgrades = desk.upgrades ? [...desk.upgrades] : [];
+          if (!upgrades.some((u) => u.id === upgradeId)) {
+            upgrades.push({ id: upgradeId, name: 'Comfort boost', cost: 0, effect: { productivity: 0.5, morale: 2 } });
+          }
+          return { ...desk, upgrades };
+        });
+        return { ...office, desks };
+      });
+      return { ...current, offices };
+    });
+    pushToast({ type: 'info', message: t('office.toast.upgraded') });
+  }, [pushToast, setCompany, t]);
 
-  const updateSalary = (empId:string, salary:number) => {
-    setCompany((c:any)=> ({ ...c, employees: (c.employees||[]).map((e:any)=> e.id===empId? {...e, salary}: e) }));
-    pushToast({ type:'info', message:'Salary updated' });
-  };
+  const handleCreateProject = useCallback(() => {
+    if (!newProject.name.trim()) {
+      pushToast({ type: 'error', message: t('projects.toast.nameRequired') });
+      return;
+    }
+    const roles = newProject.requiredRoles.length ? newProject.requiredRoles : DEFAULT_ROLES;
+    const system = projectRef.current;
+    const project = system
+      ? system.createProject(newProject.name.trim(), newProject.description, Number(newProject.effort) || 50, Number(newProject.reward) || 500, roles)
+      : {
+          id: 'proj_' + Date.now().toString(36),
+          name: newProject.name.trim(),
+          description: newProject.description,
+          effort: Number(newProject.effort) || 50,
+          progress: 0,
+          reward: Number(newProject.reward) || 500,
+          requiredRoles: roles,
+          assignees: [],
+          createdAt: new Date().toISOString(),
+        };
+    setCompany((current: CompanyState) => ({
+      ...current,
+      projects: [...(current.projects || []), project],
+    }));
+    setNewProject({ ...NEW_PROJECT_TEMPLATE });
+    setShowAddProject(false);
+    pushToast({ type: 'success', message: t('projects.toast.created', { name: project.name }) });
+  }, [newProject, pushToast, setCompany, t]);
 
-  const handleLoan = (amt:number) => {
-    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + amt }));
+  const handleCancelAddProject = useCallback(() => {
+    setShowAddProject(false);
+    setNewProject({ ...NEW_PROJECT_TEMPLATE });
+  }, []);
+
+  const handleRemoveToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
+  const handleQuickSave = useCallback(async () => {
+    setSaveBusy(true);
+    await persistSave('autosave');
+    await fetchSaveSlots();
+    setSaveBusy(false);
+  }, [fetchSaveSlots, persistSave]);
+
+  const handleCreateSaveSlot = useCallback(async () => {
+    const trimmed = saveNameInput.trim();
+    const validation = validateSaveName(trimmed);
+    if (validation) {
+      setSaveNameError(validation);
+      return;
+    }
+    setSaveBusy(true);
+    const ok = await persistSave(trimmed);
+    setSaveBusy(false);
+    if (ok) {
+      setSaveNameInput('');
+      setSaveNameError(null);
+      fetchSaveSlots();
+    }
+  }, [fetchSaveSlots, persistSave, saveNameInput, validateSaveName]);
+
+  const handleLoadSlot = useCallback(async (slot: SaveSlot) => {
+    setShowSaveModal(false);
+    await handleLoadGame(slot.name);
+  }, [handleLoadGame]);
+
+  const handleOpenSaveModal = useCallback(() => {
+    fetchSaveSlots();
+    setShowSaveModal(true);
+  }, [fetchSaveSlots]);
+
+  const handleCloseSaveModal = useCallback(() => {
+    setShowSaveModal(false);
+  }, []);
+
+  const handleLoan = useCallback((amount: number) => {
+    setCompany((current: CompanyState) => ({ ...current, funds: (current.funds || 0) + amount }));
     setBankruptOpen(false);
-    pushToast({ type:'success', message: `Loan: +${amt}` });
-  };
+    pushToast({ type: 'info', message: t('finance.loan.received', { amount: formatMoney(amount) }) });
+  }, [formatMoney, pushToast, setCompany, t]);
 
-  const handleInvestor = () => {
-    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + 5000 }));
-    setBankruptOpen(false);
-    pushToast({ type:'success', message: 'Investor +5000' });
-  };
+  const handleInvestorRescue = useCallback(() => {
+    handleLoan(5000);
+  }, [handleLoan]);
 
-  const handleRollback = () => {
-    setCompany((c:any)=> {
-      const h = c.payrollHistory || [];
-      if (h.length === 0) { pushToast({ type:'warning', message:'No payroll to rollback' }); return c; }
-      const last = h[0];
-      const funds = (c.funds||0) + (last.total || 0);
-      return { ...c, funds, payrollHistory: h.slice(1) };
+  const handlePayrollRollback = useCallback(() => {
+    setCompany((current: CompanyState) => {
+      const [last, ...rest] = current.payrollHistory || [];
+      if (!last) return current;
+      const refunded = (current.funds || 0) + (last.total || 0);
+      return { ...current, payrollHistory: rest, funds: +refunded.toFixed(2) };
     });
     setBankruptOpen(false);
-    pushToast({ type:'success', message:'Last payroll rolled back' });
-  };
+    pushToast({ type: 'success', message: t('payroll.toast.reverted') });
+  }, [pushToast, setCompany, t]);
+
+  useEffect(() => {
+    if (tickManagerRef.current) {
+      tickManagerRef.current.setTickRate(tickSpeed, (s:any)=> setCompany(s));
+    }
+  }, [tickSpeed]);
+
+  useEffect(() => {
+    const isBankrupt = (company.funds || 0) < 0;
+    if (isBankrupt && !bankruptOpen) setBankruptOpen(true);
+    if (!isBankrupt && bankruptOpen) setBankruptOpen(false);
+  }, [bankruptOpen, company.funds]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage?.setItem('preferredCurrency', currencyCode);
+      } catch (err) {
+        console.warn('Could not persist currency selection', err);
+      }
+    }
+  }, [currencyCode]);
+
+  const handleLanguageChange = useCallback((next: Language) => {
+    setLang(next);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage?.setItem('preferredLang', lang);
+      } catch (err) {
+        console.warn('Could not persist language selection', err);
+      }
+    }
+  }, [lang]);
+
+  const currencyValue = useMemo(() => ({
+    code: currencyCode,
+    profile: currencyProfile,
+    formatMoney,
+    convertMoney,
+  }), [convertMoney, currencyCode, currencyProfile, formatMoney]);
+  const rateDisplay = currencyProfile.rate >= 10 ? currencyProfile.rate.toFixed(1) : currencyProfile.rate.toFixed(2);
 
   return (
-    <div style={{ display: 'flex', gap: 12 }}>
-      <div style={{ width: 720 }}>
-        <div>
-          <h2>{company.name}</h2>
-          <p>Day: {company.day} | Funds: {(company.funds||0).toFixed(2)}</p>
+    <I18nProvider lang={lang} setLang={handleLanguageChange}>
+    <CurrencyContext.Provider value={currencyValue}>
+      <div className={`app-frame figma ${darkMode ? 'dark' : ''}`}>
+      <header className="app-toolbar">
+        <div className="brand">{t('app.brand')}</div>
+        <div className="status-line">
+          <span>{t('app.day', { value: company.day ?? 1 })}</span>
+          <span>{t('app.funds', { value: formatMoney(company.funds || 0) })}</span>
         </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={()=>hire('Alice','developer')}>Hire Dev</button>
-          <button onClick={()=>hire('Bob','designer')}>Hire Designer</button>
-          <button onClick={()=>fastForward(30)}>+30 ticks</button>
-          <button onClick={()=>{ tickManagerRef.current?.start((s:any)=> setCompany(s)); }}>Start</button>
-          <button onClick={()=>{ tickManagerRef.current?.stop(); }}>Pause</button>
+        <div className="toolbar-actions">
+          <button onClick={() => setDarkMode((mode) => !mode)} aria-label={t('app.toolbar.theme')}>
+            <span className="toolbar-icon" aria-hidden="true">
+              {darkMode ? <HiOutlineSun /> : <HiOutlineMoon />}
+            </span>
+          </button>
+          <button onClick={handlePause}>{t('app.toolbar.pause')}</button>
+          <button onClick={handleNormal}>{t('app.toolbar.speed1')}</button>
+          <button onClick={handleMedium}>{t('app.toolbar.speed3')}</button>
+          <button onClick={handleFast}>{t('app.toolbar.speed5')}</button>
+          <button onClick={handleSaveGame}>{t('app.toolbar.save')}</button>
+          <button onClick={handleOpenSaveModal}>{t('app.toolbar.saves')}</button>
         </div>
-
-        <hr />
-        <OfficeGrid company={company} />
+      </header>
+      <div className="app-body">
+        <nav className="sidebar">
+          {menuTabs.map((tab) => {
+            const TabIcon = tab.icon;
+            return (
+              <button
+                key={tab.key}
+                className={tab.key === activeTab ? 'active' : ''}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                <span className="sidebar-icon" aria-hidden="true">
+                  <TabIcon />
+                </span>
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <main>{renderActiveTab()}</main>
       </div>
-
-      <div style={{ width: 360, display:'flex', flexDirection:'column', gap:12 }}>
-        <div>
-          <h3>Projects</h3>
-          <ErrorBoundary>
-            {(company.projects || []).map((p:any) => (
-              <div key={p.id}>
-                <ProjectRowEnhanced project={p} employees={company.employees} onAssignSpecific={(pid, eid)=> assignToProject(pid,eid)} onUnassign={(pid)=> unassignSpecific(pid)} onDropEmployee={(pid, eid)=> assignToProject(pid,eid)} />
+      {showMainMenu && (
+        <MainMenu
+          canContinue={canContinue}
+          onNewGame={handleStartNewGame}
+          onContinue={handleContinue}
+          onLoadGame={() => {
+            setShowMainMenu(false);
+            handleOpenSaveModal();
+          }}
+          onToggleOptions={() => setShowOptionsOverlay((v) => !v)}
+          onExit={() => setShowMainMenu(false)}
+          lang={lang}
+          onChangeLanguage={handleLanguageChange}
+        />
+      )}
+      {showOptionsOverlay && (
+        <div className="menu-overlay" onClick={() => setShowOptionsOverlay(false)}>
+          <div className="menu-card" onClick={(e) => e.stopPropagation()}>
+            <p className="menu-eyebrow">{t('options.title')}</p>
+            <h1>{t('options.heading')}</h1>
+            <p>{t('options.subtitle')}</p>
+            <div className="option-grid">
+              <div className="option-card">
+                <h4>{t('options.theme.title')}</h4>
+                <p>{darkMode ? t('options.theme.descDark') : t('options.theme.descLight')}</p>
+                <button onClick={() => setDarkMode((mode) => !mode)}>
+                  {darkMode ? t('options.theme.toggleLight') : t('options.theme.toggleDark')}
+                </button>
               </div>
-            ))}
-          </ErrorBoundary>
+              <div className="option-card">
+                <h4>{t('options.ticks.title')}</h4>
+                <p>{t('options.ticks.body')}</p>
+                <button onClick={() => {
+                  const resumeSpeed = lastActiveSpeedRef.current || 1000;
+                  setTickSpeed(resumeSpeed);
+                  tickManagerRef.current?.setTickRate(resumeSpeed, (s:any)=> setCompany(s));
+                }}>
+                  {t('options.ticks.restore')}
+                </button>
+              </div>
+              <div className="option-card">
+                <h4>{t('options.save.title')}</h4>
+                <p>{t('options.save.body')}</p>
+                <button onClick={() => {
+                  handleOpenSaveModal();
+                  setShowOptionsOverlay(false);
+                }}>{t('options.save.open')}</button>
+              </div>
+              <div className="option-card">
+                <h4>{t('options.currency.title')}</h4>
+                <p>{t('options.currency.body')}</p>
+                <select value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value as CurrencyCode)}>
+                  {Object.values(CURRENCY_PROFILES).map((profile) => (
+                    <option key={profile.code} value={profile.code}>
+                      {profile.label} ({profile.code})
+                    </option>
+                  ))}
+                </select>
+                <small className="muted">{t('options.currency.rateHint', { rate: rateDisplay, code: currencyProfile.code })}</small>
+              </div>
+            </div>
+            <div className="menu-actions" style={{ marginTop: 24 }}>
+              <button className="btn-outline" onClick={() => setShowOptionsOverlay(false)}>{t('options.close')}</button>
+            </div>
+          </div>
         </div>
-
-        <div>
-          <h3>Employees (drag from here)</h3>
-          <EmployeesList employees={company.employees || []} />
-        </div>
-
-        <div>
-          <h3>Selected Project</h3>
-          <ErrorBoundary>
-            <ProjectDetails project={(company.projects||[]).find((x:any)=> x.id === (company.selectedProjectId || null))} employees={company.employees || []} onAssignSpecific={(pid,eid)=> assignToProject(pid,eid)} onUnassignSpecific={(pid,eid)=> unassignSpecific(pid,eid)} />
-          </ErrorBoundary>
-        </div>
-
-        <div>
-          <FinancePanel company={company} nextPayoutDays={econRef.current?.nextPayoutInDays(company)} runPayrollNow={runPayrollNow} exportPayroll={exportPayroll} updateSalary={updateSalary} openConfirmation={openConfirmation} />
-        </div>
-
-        <div>
-          <EventLog events={(company.events || [])} />
-        </div>
-      </div>
-
-      <Toasts list={toasts} onRemove={(id)=> setToasts(s=> s.filter(x=> x.id!==id))} />
-      <ConfirmationModal open={!!confirmProps} title={confirmProps?.title||''} body={confirmProps?.body||''} onConfirm={() => { confirmProps?.onConfirm && confirmProps.onConfirm(); setConfirmProps(null); }} onCancel={() => setConfirmProps(null)} />
-      <BankruptcyModal open={bankruptOpen} funds={company?.funds||0} onLoan={handleLoan} onInvestor={handleInvestor} onRollback={handleRollback} />
+       )}
+       {showPauseMenu && (
+         <div className="menu-overlay" onClick={resumeFromPause}>
+           <div className="menu-card" onClick={(e) => e.stopPropagation()}>
+            <p className="menu-eyebrow">{t('pause.eyebrow')}</p>
+             <h1>{t('pause.title')}</h1>
+             <p>{t('pause.body')}</p>
+             <div className="menu-actions">
+               <button className="primary" onClick={resumeFromPause}>{t('pause.resume')}</button>
+               <button onClick={handleSaveGame}>{t('pause.quick')}</button>
+               <button onClick={() => {
+                 setShowPauseMenu(false);
+                 setShowOptionsOverlay(true);
+               }}>{t('pause.options')}</button>
+             </div>
+           </div>
+         </div>
+        )}
+      <Toasts list={toasts} onRemove={handleRemoveToast} />
+      <ConfirmationModal
+        open={!!confirmProps?.open}
+        title={confirmProps?.title || t('confirm.confirm')}
+        body={confirmProps?.body || ''}
+        onConfirm={() => {
+          confirmProps?.onConfirm?.();
+          setConfirmProps(null);
+        }}
+        onCancel={() => {
+          confirmProps?.onCancel?.();
+          setConfirmProps(null);
+        }}
+      />
+      <BankruptcyModal
+        open={bankruptOpen}
+        funds={company.funds || 0}
+        onLoan={handleLoan}
+        onInvestor={handleInvestorRescue}
+        onRollback={handlePayrollRollback}
+      />
+      <SaveManagerModal
+        open={showSaveModal}
+        slots={saveSlots}
+        loading={saveSlotsLoading}
+        busy={saveBusy}
+        saveNameValue={saveNameInput}
+        saveNameError={saveNameError}
+        onSaveNameChange={handleSaveNameChange}
+        onClose={handleCloseSaveModal}
+        onRefresh={fetchSaveSlots}
+        onLoad={handleLoadSlot}
+        onCreate={handleCreateSaveSlot}
+        onQuickSave={handleQuickSave}
+      />
     </div>
+  </CurrencyContext.Provider>
+  </I18nProvider>
   );
-};
+}
 
 export default App;

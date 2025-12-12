@@ -1,0 +1,93 @@
+﻿import React, { useMemo } from 'react';
+import { HiArrowTrendingUp, HiCurrencyDollar, HiTrophy, HiUsers } from 'react-icons/hi2';
+import { Competitor } from '../../models/competitor';
+
+type Props = {
+  competitors: Competitor[];
+  darkMode?: boolean;
+};
+
+const relationTone = (relation: string) => {
+  if (relation === 'friendly') return 'relation-friendly';
+  if (relation === 'hostile') return 'relation-hostile';
+  return 'relation-neutral';
+};
+
+const resolveRelation = (competitor: Competitor & { relation?: string }) => {
+  if (competitor.relation) return competitor.relation;
+  if (competitor.aiLevel >= 70) return 'hostile';
+  if (competitor.aiLevel <= 35) return 'friendly';
+  return 'neutral';
+};
+
+export function CompetitorsPanel({ competitors }: Props) {
+  const sorted = useMemo(() => [...competitors].sort((a, b) => b.reputation - a.reputation), [competitors]);
+  const top = sorted[0];
+  const compactCurrency = useMemo(() => new Intl.NumberFormat('pl-PL', { notation: 'compact', maximumFractionDigits: 1 }), []);
+  const compactNumber = useMemo(() => new Intl.NumberFormat('pl-PL', { maximumFractionDigits: 0 }), []);
+
+  const totalFunds = sorted.reduce((sum, current) => sum + (current.funds || 0), 0);
+  const totalContracts = sorted.reduce((sum, current) => sum + (current.completedContracts || 0), 0);
+  const averageReputation = sorted.length
+    ? Math.round(sorted.reduce((sum, current) => sum + (current.reputation || 0), 0) / sorted.length)
+    : 0;
+
+  const highlightCards = [
+    { label: 'Lider rankingu', value: top?.name ?? 'Brak danych', detail: top ? `${top.reputation} RP` : 'czekamy na rozgrywkę', Icon: HiTrophy },
+    { label: 'Kapitał konkurentów', value: compactCurrency.format(totalFunds), detail: `${sorted.length || 'Brak'} firm`, Icon: HiCurrencyDollar },
+    { label: 'Zakończone kontrakty', value: compactNumber.format(totalContracts), detail: 'łącznie', Icon: HiUsers },
+    { label: 'Średnia reputacja', value: `${averageReputation} pkt`, detail: 'trend sektorowy', Icon: HiArrowTrendingUp },
+  ];
+
+  return (
+    <div className="panel-stack">
+      <div className="insight-grid">
+        {highlightCards.map(({ label, value, detail, Icon }) => (
+          <div className="insight-card" key={label}>
+            <p className="insight-label">{label}</p>
+            <h3>{value}</h3>
+            <p className="insight-subtext">{detail}</p>
+            <span className="insight-icon" aria-hidden="true">
+              <Icon />
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="empty-state">Brak danych o konkurencji. Rozpocznij kampanię, by odkryć rywali.</div>
+      ) : (
+        <div className="competitors-grid">
+          {sorted.map((competitor) => {
+            const relation = resolveRelation(competitor as Competitor & { relation?: string });
+            return (
+              <article className="competitor-card" key={competitor.id}>
+                <div className="competitor-head">
+                  <div className="competitor-avatar">{competitor.name.slice(0, 2).toUpperCase()}</div>
+                  <div style={{ flex: 1 }}>
+                    <h4 style={{ margin: 0 }}>{competitor.name}</h4>
+                    <small className="muted">AI lvl {competitor.aiLevel}</small>
+                  </div>
+                  <span className={`relation-pill ${relationTone(relation)}`}>{relation}</span>
+                </div>
+
+                <div className="competitor-meta">
+                  <span>Reputacja: <strong>{competitor.reputation}</strong></span>
+                  <span>Kontrakty: <strong>{competitor.completedContracts}</strong></span>
+                  <span>Środki: <strong>{compactCurrency.format(competitor.funds)}</strong></span>
+                </div>
+
+                <div>
+                  <small className="muted">Dynamika rynkowa</small>
+                  <div className="metric-bar">
+                    <span style={{ width: `${Math.min(100, competitor.reputation)}%` }} />
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

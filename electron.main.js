@@ -1,4 +1,4 @@
-// electron.main.js  <- zastêpuje poprzedni kod main
+// electron.main.js  <- zastÄ™puje poprzedni kod main
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -135,6 +135,30 @@ ipcMain.handle('save-payroll', async (event, payload) => {
         return filePath;
     } catch (err) {
         console.error('[main] save-payroll error', err);
+        throw err;
+    }
+});
+
+ipcMain.handle('list-saves', async () => {
+    try {
+        const saveDir = path.join(process.cwd(), 'save');
+        if (!fs.existsSync(saveDir)) {
+            return [];
+        }
+        const files = fs.readdirSync(saveDir).filter((file) => file.endsWith('.json'));
+        const slots = files.map((file) => {
+            const filePath = path.join(saveDir, file);
+            const stats = fs.statSync(filePath);
+            return {
+                name: path.basename(file, '.json'),
+                updatedAt: stats.mtimeMs,
+                size: stats.size,
+                path: filePath,
+            };
+        });
+        return slots;
+    } catch (err) {
+        console.error('[main] list-saves error', err);
         throw err;
     }
 });

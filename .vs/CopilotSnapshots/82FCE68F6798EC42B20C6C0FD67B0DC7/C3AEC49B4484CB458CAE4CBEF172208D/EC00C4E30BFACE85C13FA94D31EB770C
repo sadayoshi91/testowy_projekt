@@ -1,0 +1,101 @@
+﻿import React from 'react';
+import { Office } from '../../models/office';
+import { Employee } from '../../models/employee';
+
+interface OfficeMapProps {
+  offices: Office[];
+  employees: Employee[];
+  darkMode?: boolean;
+  onRent?: (officeId: string) => void;
+  onAssignDesk?: (officeId: string, deskId: string, employeeId: string) => void;
+}
+
+const getInitials = (name?: string) => {
+  if (!name) return '?';
+  const parts = name.trim().split(' ');
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+};
+
+export const OfficeMap: React.FC<OfficeMapProps> = ({ offices, employees, darkMode, onRent, onAssignDesk }) => {
+  return (
+    <div className={`office-map${darkMode ? ' dark' : ''}`}>
+      {offices.map(office => {
+        const desks = office.desks || [];
+        const occupied = desks.filter(d => d.assignedEmployeeId).length;
+        const occupancy = desks.length ? Math.round((occupied / desks.length) * 100) : 0;
+        return (
+          <div key={office.id} className="office-card">
+            <header>
+              <div>
+                <div style={{ fontWeight: 700 }}>{office.name}</div>
+                <small style={{ opacity: 0.7 }}>Rent: {office.rent}</small>
+              </div>
+              <div className="office-badge">
+                {office.owned ? 'ACTIVE' : 'FOR RENT'}
+              </div>
+            </header>
+            <div className="office-capacity">
+              <div>Occupancy {occupied}/{desks.length}</div>
+              <div className="capacity-bar">
+                <span style={{ width: `${occupancy}%` }} />
+              </div>
+            </div>
+            {!office.owned && onRent && (
+              <button
+                className="office-rent"
+                onClick={() => onRent(office.id)}
+              >
+                Rent this office
+              </button>
+            )}
+            <div className="desk-grid">
+              {desks.map((desk, index) => {
+                const occupant = employees.find(e => e.id === desk.assignedEmployeeId);
+                return (
+                  <div key={desk.id} className="desk-cell">
+                    <div className="desk-meta">
+                      <span className="desk-label">Desk {index + 1}</span>
+                      {occupant && <span className="employee-bubble">{getInitials(occupant.name)}</span>}
+                    </div>
+                    <div className="desk-occupant">
+                      {occupant ? (
+                        <>
+                          <strong>{occupant.name}</strong>
+                          <small>{occupant.role}</small>
+                        </>
+                      ) : (
+                        <span className="desk-empty">Unassigned</span>
+                      )}
+                    </div>
+                    {office.owned && onAssignDesk && (
+                      <div className="desk-actions">
+                        <select
+                          value={desk.assignedEmployeeId || ''}
+                          onChange={e => onAssignDesk(office.id, desk.id, e.target.value)}
+                        >
+                          <option value="">-- assign employee --</option>
+                          {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
+                          ))}
+                        </select>
+                        {desk.assignedEmployeeId && (
+                          <button onClick={() => onAssignDesk(office.id, desk.id, '')}>Clear</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {desks.length === 0 && (
+                <div className="desk-cell" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                  <div style={{ opacity: 0.6 }}>No desks defined</div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};

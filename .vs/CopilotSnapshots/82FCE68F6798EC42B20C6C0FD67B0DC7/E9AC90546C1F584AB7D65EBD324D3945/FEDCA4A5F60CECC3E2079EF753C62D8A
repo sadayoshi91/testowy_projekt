@@ -1,0 +1,120 @@
+﻿import { Contract } from '../models/contract';
+import { Role } from '../models/project';
+
+const industries = [
+  'Fintech',
+  'Healthcare',
+  'Retail',
+  'EdTech',
+  'Gaming',
+  'Logistics',
+  'AI & Data',
+  'Marketing',
+  'Travel',
+  'Smart Home',
+];
+
+const rolePools: Role[][] = [
+  ['developer'],
+  ['developer', 'designer'],
+  ['developer', 'designer', 'marketer'],
+  ['developer', 'designer', 'marketer', 'researcher'],
+];
+
+const difficultyTiers = [
+  {
+    key: 'starter' as const,
+    minReputation: 0,
+    reward: [1200, 3000],
+    durationDays: [4, 7],
+    roles: [0, 1],
+    effort: [60, 120],
+    penaltyMultiplier: 0.1,
+  },
+  {
+    key: 'standard' as const,
+    minReputation: 80,
+    reward: [2500, 6000],
+    durationDays: [6, 11],
+    roles: [1, 2],
+    effort: [120, 200],
+    penaltyMultiplier: 0.15,
+  },
+  {
+    key: 'advanced' as const,
+    minReputation: 140,
+    reward: [6000, 12000],
+    durationDays: [10, 16],
+    roles: [2, 3],
+    effort: [200, 320],
+    penaltyMultiplier: 0.2,
+  },
+  {
+    key: 'expert' as const,
+    minReputation: 200,
+    reward: [12000, 22000],
+    durationDays: [14, 22],
+    roles: [2, 4],
+    effort: [320, 500],
+    penaltyMultiplier: 0.25,
+  },
+];
+
+const adjectives = ['Next-Gen', 'Scalable', 'Secure', 'Immersive', 'Data-Driven', 'Cloud', 'Mobile', 'Social', 'Intelligent'];
+const deliverables = ['Platform', 'Portal', 'Dashboard', 'Application', 'Service', 'Marketplace', 'Suite', 'Tool'];
+
+export interface ContractGenerationContext {
+  reputation: number;
+  day: number;
+  count?: number;
+}
+
+const randomItem = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+const randomInRange = (min: number, max: number) => Math.round(min + Math.random() * (max - min));
+
+const pickTier = (reputation: number) => {
+  const available = difficultyTiers.filter(t => reputation >= t.minReputation);
+  return available.length ? randomItem(available) : difficultyTiers[0];
+};
+
+const buildName = (industry: string) => `${randomItem(adjectives)} ${industry} ${randomItem(deliverables)}`;
+
+const selectRoles = (tier: typeof difficultyTiers[number]) => {
+  const [minIndex, maxIndex] = tier.roles;
+  const index = Math.min(rolePools.length - 1, randomInRange(minIndex, maxIndex));
+  const roles = rolePools[index];
+  return roles.length <= 2 ? roles : roles.slice(0, randomInRange(2, roles.length));
+};
+
+const createContract = (ctx: ContractGenerationContext): Contract => {
+  const tier = pickTier(ctx.reputation);
+  const industry = randomItem(industries);
+  const reward = randomInRange(tier.reward[0], tier.reward[1]);
+  const durationDays = randomInRange(tier.durationDays[0], tier.durationDays[1]);
+  const effort = randomInRange(tier.effort[0], tier.effort[1]);
+  const deadlineDate = new Date();
+  deadlineDate.setDate(deadlineDate.getDate() + durationDays);
+
+  return {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    name: buildName(industry),
+    description: `Deliver a ${industry.toLowerCase()} solution within ${durationDays} days.`,
+    reward,
+    penalty: Math.round(reward * tier.penaltyMultiplier),
+    deadline: deadlineDate.toISOString(),
+    requiredRoles: selectRoles(tier),
+    status: 'available',
+    createdAt: new Date().toISOString(),
+    difficulty: tier.key,
+    industry,
+    minReputation: tier.minReputation,
+    durationDays,
+    expectedEffort: effort,
+    dueDay: ctx.day + durationDays,
+  };
+};
+
+export const generateContractsBatch = (ctx: ContractGenerationContext): Contract[] => {
+  const count = ctx.count ?? 5;
+  return Array.from({ length: count }, () => createContract(ctx));
+};

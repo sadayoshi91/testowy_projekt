@@ -1,0 +1,19 @@
+﻿import React from 'react';
+
+export function ConfirmationModal({ open, title, body, onConfirm, onCancel }: { open: boolean, title: string, body: React.ReactNode, onConfirm: ()=>void, onCancel: ()=>void }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card">
+        <div className="modal-header">
+          <h3 style={{ margin: 0 }}>{title}</h3>
+        </div>
+        <div>{body}</div>
+        <div className="actions">
+          <button className="btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="primary" onClick={onConfirm}>Confirm</button>
+        </div>
+      </div>
+    </div>
+  );
+}

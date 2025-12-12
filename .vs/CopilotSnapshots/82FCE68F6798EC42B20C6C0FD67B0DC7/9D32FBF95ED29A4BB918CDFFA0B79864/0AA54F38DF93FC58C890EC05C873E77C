@@ -1,0 +1,68 @@
+﻿import React from 'react';
+import { Training } from '../../models/training';
+import { Employee } from '../../models/employee';
+
+export function TrainingsPanel({ trainings, employees, onStart, darkMode } : {
+ trainings: Training[],
+ employees: Employee[],
+ onStart: (trainingId: string, employeeId: string) => void,
+ darkMode?: boolean
+}) {
+ const panelStyle = {
+ border: '1px solid',
+ borderColor: darkMode ? '#444' : '#ccc',
+ borderRadius:6,
+ padding:10,
+ background: darkMode ? '#1e2a1e' : '#f9fff9',
+ color: darkMode ? '#fff' : '#222',
+ marginBottom:12
+ };
+ const trainingStyle = {
+ borderBottom: '1px solid',
+ borderColor: darkMode ? '#333' : '#eee',
+ marginBottom:8,
+ paddingBottom:8
+ };
+ const buttonStyle = {
+ background: darkMode ? '#333' : '#fff',
+ color: darkMode ? '#fff' : '#222',
+ border: '1px solid',
+ borderColor: darkMode ? '#555' : '#ccc',
+ borderRadius:4,
+ padding: '4px10px',
+ cursor: 'pointer',
+ marginTop:4
+ };
+ return (
+ <div style={panelStyle}>
+ <h3 style={{ color: darkMode ? '#fff' : '#222' }}>Available Trainings</h3>
+ {trainings.length ===0 && <div style={{ color: darkMode ? '#aaa' : '#777' }}>No trainings available</div>}
+ {trainings.map(training => (
+ <div key={training.id} style={trainingStyle}>
+ <div><strong>{training.name}</strong> <small>({training.status})</small></div>
+ <div style={{ fontSize:13, color: darkMode ? '#ccc' : '#555' }}>{training.description}</div>
+ <div>Role: {training.role}</div>
+ <div>Skill gain: {training.skillGain}</div>
+ <div>Duration: {training.durationDays} days</div>
+ <div>Cost: {training.cost}</div>
+ {training.status === 'available' && (
+ <div style={{ marginTop:4 }}>
+ <select id={`emp-sel-${training.id}`}>
+ <option value="">-- choose employee --</option>
+ {employees.filter(e => e.role === training.role).map(emp => (
+ <option key={emp.id} value={emp.id}>{emp.name}</option>
+ ))}
+ </select>
+ <button style={buttonStyle} onClick={() => {
+ const sel = document.getElementById(`emp-sel-${training.id}`) as HTMLSelectElement;
+ if (sel?.value) onStart(training.id, sel.value);
+ }}>Start training</button>
+ </div>
+ )}
+ {training.status === 'in_progress' && <span style={{ color: '#0a0' }}>In progress</span>}
+ {training.status === 'completed' && <span style={{ color: '#00a' }}>Completed</span>}
+ </div>
+ ))}
+ </div>
+ );
+}

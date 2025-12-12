@@ -1,0 +1,5 @@
+Zmiana0.1.4
+
+- Dodano model Contract (kontrakt) w src/models/contract.ts
+- Dodano pole contracts do modelu Company
+- Przygotowanie pod panel kontraktów i logikê przyjmowania kontraktów

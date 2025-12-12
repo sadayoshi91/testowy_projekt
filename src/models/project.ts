@@ -1,5 +1,6 @@
 // src/models/project.ts
 export type Role = 'developer' | 'designer' | 'marketer' | 'researcher';
+export type ProjectStatus = 'active' | 'completed' | 'paused';
 
 export interface Project {
   id: string;
@@ -14,4 +15,10 @@ export interface Project {
   completed?: boolean;
   deadline?: string | null; // optional ISO date
   rewardPaid?: boolean;
+  status?: ProjectStatus; // NEW: project status
+  deadlineDay?: number;
+  penalty?: number;
+  failed?: boolean;
+  penaltyApplied?: boolean;
+  contractId?: string;
 }

@@ -1,0 +1,28 @@
+﻿// src/models/contract.ts
+import { Role } from './project';
+
+export type ContractStatus = 'available' | 'accepted' | 'expired' | 'completed' | 'locked' | 'claimed';
+
+export interface Contract {
+ id: string;
+ name: string;
+ description?: string;
+ reward: number;
+ deadline: string; // ISO date
+ requiredRoles: Role[];
+ status: ContractStatus;
+ assignedProjectId?: string;
+ claimedBy?: string;
+ createdAt: string;
+ expired?: boolean;
+ completed?: boolean;
+ failed?: boolean;
+ difficulty?: 'starter' | 'standard' | 'advanced' | 'expert';
+ industry?: string;
+ minReputation?: number;
+ durationDays?: number;
+ penalty?: number;
+ expectedEffort?: number;
+ dueDay?: number;
+ progress?: number;
+}

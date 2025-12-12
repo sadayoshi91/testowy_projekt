@@ -1,0 +1,236 @@
+﻿import React, { useEffect, useState, useRef } from 'react';
+import { createEmptyCompany } from '../models/company';
+import { TickManager } from '../simulation/TickManager';
+import { HRSystem } from '../systems/HRSystem';
+import { ProjectSystem } from '../systems/ProjectSystem';
+import { EconomySystem } from '../systems/EconomySystem';
+import { ProjectRowEnhanced } from './components/ProjectList_enhanced';
+import { ProjectDetails } from './components/ProjectDetails';
+import { EmployeesList } from './components/EmployeesList';
+import { AssignModal } from './components/AssignModal';
+import { EventLog } from './components/EventLog';
+import { FinancePanel } from './components/FinancePanel';
+import { Toasts, ToastItem } from './components/Toast';
+import { ConfirmationModal } from './components/ConfirmationModal';
+import { BankruptcyModal } from './components/BankruptcyModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { OfficeGrid } from './components/OfficeGrid';
+import { listMods } from '../services/ModLoader';
+import { useEconomy } from './hooks/useEconomy';
+import { usePayrollHelpers } from './hooks/usePayroll';
+
+
+const App: React.FC = () => {
+  const [company, setCompany] = useState<any>(createEmptyCompany());
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [confirmProps, setConfirmProps] = useState<any>(null);
+  const [bankruptOpen, setBankruptOpen] = useState(false);
+
+  const tickManagerRef = useRef<any>(null);
+  const hrRef = useRef<any>(null);
+  const projectRef = useRef<any>(null);
+  const econRef = useRef<any>(null);
+  const economy = useEconomy(company, setCompany); 
+  const getCompany = () => company;
+  const { runPayroll: backupPayroll, exportPayroll: exportPayrollIPC } = usePayrollHelpers(setCompany, getCompany, (t: any) => {
+        
+        pushToast(t);
+    });
+  
+
+
+  if (!hrRef.current) hrRef.current = new HRSystem();
+  if (!projectRef.current) projectRef.current = new ProjectSystem();
+  if (!econRef.current) econRef.current = new EconomySystem(company?.payrollIntervalDays || 30);
+
+  const pushToast = (t: Omit<ToastItem, 'id'>) => {
+    const id = (Date.now()).toString(36) + Math.random().toString(36).slice(2,6);
+    setToasts(s => [{ id, ...t }, ...s].slice(0, 6));
+  };
+
+  const openConfirmation = (props:any) => {
+    setConfirmProps(props);
+  };
+
+  useEffect(() => {
+    (async () => {
+      const m = await listMods();
+    })();
+  }, []);
+
+  const pushEvent = (msg: string) => {
+    const stamp = new Date().toLocaleTimeString();
+    setCompany((c:any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
+  };
+
+  const tickCallback = (state: any): any => {
+    const hr = hrRef.current!;
+    const ps = projectRef.current!;
+    const econ = econRef.current!;
+    let updated = hr.tickCompany(state);
+    updated = ps.tickProjects(updated);
+    updated = econ.tickEconomy(updated);
+
+    const empIncome = (updated.employees || []).reduce((acc:number, e:any) => {
+      if ((e as any).onBreak) return acc;
+      return acc + (e.productivity || 0);
+    }, 0);
+    updated.funds = +( (updated.funds || 0) + empIncome ).toFixed(2);
+    updated.day = (updated.day || 0) + 1;
+
+    if ((updated.funds || 0) < -1000) {
+      try { tickManagerRef.current?.stop(); } catch(e){}
+      setBankruptOpen(true);
+      pushToast({ type:'warning', title:'Bankruptcy', message:'Funds critically low, paused' });
+    }
+
+    return updated;
+  };
+
+  useEffect(() => {
+    tickManagerRef.current = new TickManager(tickCallback, 1000);
+    return () => tickManagerRef.current?.stop();
+  }, []);
+
+  const hire = (name='Dev', role:'developer'|'designer'|'marketer'|'researcher'='developer', level='junior', skill=50, salary=160) => {
+    const hr = hrRef.current!;
+    const emp = hr.hireEmployee(name, role as any, level as any, skill);
+    (emp as any).salary = salary;
+    setCompany((c:any) => ({ ...c, employees: [...(c.employees||[]), emp] }));
+    pushToast({ type:'success', title:'Hire', message:`${emp.name} hired` });
+  };
+
+  const assignToProject = (projectId:string, employeeId?:string) => {
+    const p = (company.projects||[]).find((x:any)=>x.id===projectId);
+    if (!p) return;
+    if (employeeId) {
+      const emp = company.employees.find((e:any)=> e.id === employeeId);
+      if (!emp) { pushToast({ type:'error', message:'Employee not found' }); return; }
+      if ((p.assignees||[]).includes(employeeId)) { pushToast({ type:'warning', message:'Already assigned' }); return; }
+      setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), employeeId]}: pr) }));
+      pushToast({ type:'info', message: `${emp.name} assigned` });
+      return;
+    }
+    const free = (company.employees||[]).find((e:any)=> !(p.assignees||[]).includes(e.id));
+    if (!free) { pushToast({ type:'warning', message:'No free employee' }); return; }
+    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), free.id]}: pr) }));
+    pushToast({ type:'info', message: `${free.name} auto-assigned` });
+  };
+
+  const unassignSpecific = (projectId:string, employeeId:string) => {
+    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: (pr.assignees||[]).filter((x:any)=> x!==employeeId)}: pr) }));
+  };
+
+  const fastForward = (n:number) => {
+    if (!tickManagerRef.current) return;
+    const snapshot = ('structuredClone' in window) ? (window as any).structuredClone(company) : JSON.parse(JSON.stringify(company));
+    const res = tickManagerRef.current.runNTicks(snapshot, n);
+    setCompany(res);
+  };
+
+    const runPayrollNow = () => {
+        // use economy hook to run payroll (this will update company via setCompany)
+        const res = economy.runPayrollNow();
+        // start autosave/backup/export tasks
+        try { backupPayroll(); } catch (e) { /* ignore */ }
+        // open bankruptcy modal if needed
+        if ((res?.funds || 0) < -1000) setBankruptOpen(true);
+    };
+
+
+    const exportPayroll = () => {
+        // delegate to payroll helper which handles IPC and toasts
+        exportPayrollIPC();
+    };
+
+
+  const updateSalary = (empId:string, salary:number) => {
+    setCompany((c:any)=> ({ ...c, employees: (c.employees||[]).map((e:any)=> e.id===empId? {...e, salary}: e) }));
+    pushToast({ type:'info', message:'Salary updated' });
+  };
+
+  const handleLoan = (amt:number) => {
+    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + amt }));
+    setBankruptOpen(false);
+    pushToast({ type:'success', message: `Loan: +${amt}` });
+  };
+
+  const handleInvestor = () => {
+    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + 5000 }));
+    setBankruptOpen(false);
+    pushToast({ type:'success', message: 'Investor +5000' });
+  };
+
+  const handleRollback = () => {
+    setCompany((c:any)=> {
+      const h = c.payrollHistory || [];
+      if (h.length === 0) { pushToast({ type:'warning', message:'No payroll to rollback' }); return c; }
+      const last = h[0];
+      const funds = (c.funds||0) + (last.total || 0);
+      return { ...c, funds, payrollHistory: h.slice(1) };
+    });
+    setBankruptOpen(false);
+    pushToast({ type:'success', message:'Last payroll rolled back' });
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ width: 720 }}>
+        <div>
+          <h2>{company.name}</h2>
+          <p>Day: {company.day} | Funds: {(company.funds||0).toFixed(2)}</p>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={()=>hire('Alice','developer')}>Hire Dev</button>
+          <button onClick={()=>hire('Bob','designer')}>Hire Designer</button>
+          <button onClick={()=>fastForward(30)}>+30 ticks</button>
+          <button onClick={()=>{ tickManagerRef.current?.start((s:any)=> setCompany(s)); }}>Start</button>
+          <button onClick={()=>{ tickManagerRef.current?.stop(); }}>Pause</button>
+        </div>
+
+        <hr />
+        <OfficeGrid company={company} />
+      </div>
+
+      <div style={{ width: 360, display:'flex', flexDirection:'column', gap:12 }}>
+        <div>
+          <h3>Projects</h3>
+          <ErrorBoundary>
+            {(company.projects || []).map((p:any) => (
+              <div key={p.id}>
+                <ProjectRowEnhanced project={p} employees={company.employees} onAssignSpecific={(pid, eid)=> assignToProject(pid,eid)} onUnassign={(pid)=> unassignSpecific(pid)} onDropEmployee={(pid, eid)=> assignToProject(pid,eid)} />
+              </div>
+            ))}
+          </ErrorBoundary>
+        </div>
+
+        <div>
+          <h3>Employees (drag from here)</h3>
+          <EmployeesList employees={company.employees || []} />
+        </div>
+
+        <div>
+          <h3>Selected Project</h3>
+          <ErrorBoundary>
+            <ProjectDetails project={(company.projects||[]).find((x:any)=> x.id === (company.selectedProjectId || null))} employees={company.employees || []} onAssignSpecific={(pid,eid)=> assignToProject(pid,eid)} onUnassignSpecific={(pid,eid)=> unassignSpecific(pid,eid)} />
+          </ErrorBoundary>
+        </div>
+
+        <div>
+          <FinancePanel company={company} nextPayoutDays={econRef.current?.nextPayoutInDays(company)} runPayrollNow={runPayrollNow} exportPayroll={exportPayroll} updateSalary={updateSalary} openConfirmation={openConfirmation} />
+        </div>
+
+        <div>
+          <EventLog events={(company.events || [])} />
+        </div>
+      </div>
+
+      <Toasts list={toasts} onRemove={(id)=> setToasts(s=> s.filter(x=> x.id!==id))} />
+      <ConfirmationModal open={!!confirmProps} title={confirmProps?.title||''} body={confirmProps?.body||''} onConfirm={() => { confirmProps?.onConfirm && confirmProps.onConfirm(); setConfirmProps(null); }} onCancel={() => setConfirmProps(null)} />
+      <BankruptcyModal open={bankruptOpen} funds={company?.funds||0} onLoan={handleLoan} onInvestor={handleInvestor} onRollback={handleRollback} />
+    </div>
+  );
+};
+
+export default App;

@@ -1,0 +1,103 @@
+﻿import React from 'react';
+import { Contract } from '../../models/contract';
+
+interface Props {
+  contracts?: Contract[];
+  onAccept: (id: string) => void;
+  onRefreshOffers?: () => void;
+  refreshCost?: number;
+  darkMode?: boolean;
+}
+
+const difficultyLabels: Record<string, string> = {
+  all: 'All difficulties',
+  starter: 'Starter',
+  standard: 'Standard',
+  advanced: 'Advanced',
+  expert: 'Expert',
+};
+
+export function ContractsPanel({ contracts = [], onAccept, onRefreshOffers, refreshCost = 0, darkMode }: Props) {
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [difficulty, setDifficulty] = React.useState<'all' | 'starter' | 'standard' | 'advanced' | 'expert'>('all');
+  const [hideLocked, setHideLocked] = React.useState(true);
+
+  const filtered = React.useMemo(() => {
+    return contracts.filter(contract => {
+      if (hideLocked && contract.status === 'locked') return false;
+      if (difficulty !== 'all' && contract.difficulty !== difficulty) return false;
+      if (searchTerm) {
+        const haystack = `${contract.name} ${contract.description} ${contract.industry}`.toLowerCase();
+        if (!haystack.includes(searchTerm.toLowerCase())) return false;
+      }
+      return true;
+    });
+  }, [contracts, hideLocked, difficulty, searchTerm]);
+
+  return (
+    <div className="contracts-panel">
+      <div className="contracts-toolbar">
+        <input
+          type="text"
+          placeholder="Search contracts"
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+        />
+        <select value={difficulty} onChange={e => setDifficulty(e.target.value as any)}>
+          {Object.entries(difficultyLabels).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+        <label className="toggle">
+          <input type="checkbox" checked={hideLocked} onChange={e => setHideLocked(e.target.checked)} />
+          Hide locked
+        </label>
+        {onRefreshOffers && (
+          <button className="refresh" onClick={onRefreshOffers}>
+            Refresh offers{refreshCost ? ` (-${refreshCost})` : ''}
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="contracts-empty">No contracts match filters</div>
+      )}
+
+      {filtered.map(contract => (
+        <div key={contract.id} className={`contract-card status-${contract.status}`}>
+          <header>
+            <div>
+              <strong>{contract.name}</strong> <small>({contract.status})</small>
+            </div>
+            <span className="badge">{contract.industry ?? 'General'}</span>
+          </header>
+          <p className="description">{contract.description}</p>
+          <div className="meta">
+            <div>Difficulty: {contract.difficulty ?? 'standard'}</div>
+            <div>Reward: <strong>{contract.reward}</strong>{contract.penalty ? ` (penalty ${contract.penalty})` : ''}</div>
+            <div>Deadline: {new Date(contract.deadline).toLocaleDateString()} ({contract.durationDays ?? '?'} days)</div>
+            {contract.expectedEffort && <div>Expected effort: {contract.expectedEffort} pts</div>}
+            <div>Roles: {(contract.requiredRoles || []).join(', ')}</div>
+            {contract.minReputation && (
+              <div className="warning">Requires reputation {contract.minReputation}</div>
+            )}
+          </div>
+          <div className="actions">
+            {contract.status === 'available' && (
+              <button onClick={() => onAccept(contract.id)}>Accept contract</button>
+            )}
+            {contract.status === 'claimed' && (
+              <span className="claimed">Claimed by {contract.claimedBy || 'competitor'}</span>
+            )}
+            {contract.status === 'locked' && (
+              <span className="locked">Insufficient reputation</span>
+            )}
+            {contract.status === 'accepted' && <span className="accepted">Accepted</span>}
+            {contract.status === 'completed' && <span className="completed">Completed</span>}
+            {contract.status === 'expired' && <span className="expired">Expired</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

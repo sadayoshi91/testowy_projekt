@@ -1,0 +1,56 @@
+﻿// electron/preload.js
+// Expose a safe electronAPI for renderer via contextBridge
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+    // Save payroll array (structured) -> main writes CSV and returns filepath string
+    savePayroll: async (payload) => {
+        try {
+            const res = await ipcRenderer.invoke('save-payroll', payload);
+            // main returns a filepath string when successful
+            return { success: true, path: res };
+        } catch (e) {
+            return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+    },
+
+    // Save arbitrary JSON "game save" (name, data string) -> returns {path}
+    saveFile: async (name, data) => {
+        try {
+            const res = await ipcRenderer.invoke('save-file', name, data);
+            return { success: true, path: res && res.path ? res.path : res };
+        } catch (e) {
+            return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+    },
+
+    // Load arbitrary JSON save by name -> returns string or null
+    loadFile: async (name) => {
+        try {
+            const res = await ipcRenderer.invoke('load-file', name);
+            return { success: true, data: res };
+        } catch (e) {
+            return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+    },
+
+    // List mods (calls main list-mods handler) -> returns array
+    listMods: async () => {
+        try {
+            const res = await ipcRenderer.invoke('list-mods');
+            return { success: true, mods: res || [] };
+        } catch (e) {
+            return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+    },
+
+    // Generic invoke helper if you ever need to call ad-hoc IPC (use sparingly)
+    invoke: async (channel, ...args) => {
+        try {
+            const res = await ipcRenderer.invoke(channel, ...args);
+            return { success: true, res };
+        } catch (e) {
+            return { success: false, error: e && e.message ? e.message : String(e) };
+        }
+    }
+});

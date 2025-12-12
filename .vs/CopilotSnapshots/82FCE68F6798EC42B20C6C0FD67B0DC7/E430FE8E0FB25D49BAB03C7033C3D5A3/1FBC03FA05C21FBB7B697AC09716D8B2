@@ -1,0 +1,43 @@
+﻿// src/app/components/EmployeesList.tsx
+import React from 'react';
+import { Employee } from '../../models/employee';
+
+export function EmployeesList({ employees = [] }: { employees: Employee[] }) {
+ if (!employees.length) {
+ return <div className="empty-state">No employees hired yet</div>;
+ }
+
+ return (
+ <div className="employee-grid">
+ {employees.map((emp) => (
+ <article key={emp.id} className="employee-card">
+ <div className="employee-card__header">
+ <div className="employee-card__name">
+ <strong>{emp.name}</strong>
+ <small>{emp.role}</small>
+ </div>
+ <span className="tag employee-card__level">{emp.level}</span>
+ </div>
+ <div className="employee-card__stats">
+ <span>Salary: {emp.salary?.toLocaleString?.() ?? emp.salary}</span>
+ <span>Prod: {Math.round(emp.productivity ?? 0)}</span>
+ <span>Morale: {Math.round(emp.morale ?? 0)}</span>
+ <span>Fatigue: {Math.round(emp.fatigue ?? 0)}</span>
+ </div>
+ {emp.unlockedRoles?.length ? (
+ <div className="muted">Unlocked roles: {emp.unlockedRoles.join(', ')}</div>
+ ) : null}
+ {emp.trainingHistory?.length ? (
+ <div className="muted">Training history: {emp.trainingHistory.join(', ')}</div>
+ ) : null}
+ {emp.trait && (
+ <div className="employee-card__trait">
+ Trait: <strong>{emp.trait}</strong>
+ {emp.traitDescription ? ` — ${emp.traitDescription}` : ''}
+ </div>
+ )}
+ </article>
+ ))}
+ </div>
+ );
+}

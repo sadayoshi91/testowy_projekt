@@ -1,0 +1,42 @@
+﻿import React from 'react';
+import { Training } from '../../models/training';
+import { Employee } from '../../models/employee';
+
+export function TrainingsPanel({ trainings, employees, onStart } : {
+ trainings: Training[],
+ employees: Employee[],
+ onStart: (trainingId: string, employeeId: string) => void
+}) {
+ return (
+ <div style={{ border: '1px solid #ccc', borderRadius:6, padding:10, background: '#f9fff9', marginBottom:12 }}>
+ <h3>Available Trainings</h3>
+ {trainings.length ===0 && <div style={{ color: '#777' }}>No trainings available</div>}
+ {trainings.map(training => (
+ <div key={training.id} style={{ borderBottom: '1px solid #eee', marginBottom:8, paddingBottom:8 }}>
+ <div><strong>{training.name}</strong> <small>({training.status})</small></div>
+ <div style={{ fontSize:13, color: '#555' }}>{training.description}</div>
+ <div>Role: {training.role}</div>
+ <div>Skill gain: {training.skillGain}</div>
+ <div>Duration: {training.durationDays} days</div>
+ <div>Cost: {training.cost}</div>
+ {training.status === 'available' && (
+ <div style={{ marginTop:4 }}>
+ <select id={`emp-sel-${training.id}`}>
+ <option value="">-- choose employee --</option>
+ {employees.filter(e => e.role === training.role).map(emp => (
+ <option key={emp.id} value={emp.id}>{emp.name}</option>
+ ))}
+ </select>
+ <button style={{ marginLeft:6 }} onClick={() => {
+ const sel = document.getElementById(`emp-sel-${training.id}`) as HTMLSelectElement;
+ if (sel?.value) onStart(training.id, sel.value);
+ }}>Start training</button>
+ </div>
+ )}
+ {training.status === 'in_progress' && <span style={{ color: '#0a0' }}>In progress</span>}
+ {training.status === 'completed' && <span style={{ color: '#00a' }}>Completed</span>}
+ </div>
+ ))}
+ </div>
+ );
+}

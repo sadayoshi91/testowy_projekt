@@ -1,0 +1,93 @@
+﻿import React, { useState } from 'react';
+import { useCurrency } from '../context/CurrencyContext';
+
+export function FinancePanel({ company, nextPayoutDays, runPayrollNow, exportPayroll, updateSalary, openConfirmation, darkMode }: any) {
+  const { formatMoney } = useCurrency();
+  const panelStyle = {
+    border: '1px solid',
+    borderColor: darkMode ? '#444' : '#ccc',
+    borderRadius:6,
+    padding:10,
+    background: darkMode ? '#232323' : '#fff',
+    color: darkMode ? '#fff' : '#222',
+    marginBottom:12
+  };
+  const buttonStyle = {
+    background: darkMode ? '#333' : '#fff',
+    color: darkMode ? '#fff' : '#222',
+    border: '1px solid',
+    borderColor: darkMode ? '#555' : '#ccc',
+    borderRadius:4,
+    padding: '4px10px',
+    cursor: 'pointer',
+    marginRight:4
+  };
+  const inputStyle = {
+    background: darkMode ? '#222' : '#fff',
+    color: darkMode ? '#fff' : '#222',
+    border: '1px solid',
+    borderColor: darkMode ? '#555' : '#ccc',
+    borderRadius:4,
+    padding: '2px6px',
+    marginRight:4
+  };
+
+  const employees = Array.isArray(company?.employees) ? company.employees : [];
+  const totalPayroll = employees.reduce((acc:number, e:any) => acc + (Number(e?.salary || 0)), 0);
+
+  const onRun = () => {
+    openConfirmation({
+      title: 'Run payroll now?',
+      body: `This will deduct ${formatMoney(totalPayroll)} plus taxes and rent from funds.`,
+      onConfirm: () => { runPayrollNow(); },
+      onCancel: () => {}
+    });
+  };
+
+  return (
+    <div style={panelStyle}>
+      <h3 style={{ color: darkMode ? '#fff' : '#222' }}>Finance</h3>
+      <div>Funds: {formatMoney(company.funds ||0)}</div>
+      <div style={{ marginTop:8 }}><strong>Payroll (sum salaries):</strong> {formatMoney(totalPayroll)}</div>
+      <div style={{ marginTop:4 }}><strong>Next payout in:</strong> {nextPayoutDays} days</div>
+
+      <div style={{ marginTop:8 }}>
+        <button style={buttonStyle} onClick={onRun}>Run payroll now</button>
+        <button style={buttonStyle} onClick={() => exportPayroll()}>Export payroll history</button>
+      </div>
+
+      <div style={{ marginTop:10 }}>
+        <label>Payroll interval (days): </label>
+        <input type="number" min={1} defaultValue={company.payrollIntervalDays ||30} style={inputStyle} onBlur={e => openConfirmation && openConfirmation({
+          title: 'Change payroll interval',
+          body: 'Are you sure you want to change the payroll interval?',
+          onConfirm: () => updateSalary && updateSalary('interval', Number((e.target as HTMLInputElement).value))
+        })} />
+        <button style={buttonStyle} onClick={e => openConfirmation && openConfirmation({
+          title: 'Change payroll interval',
+          body: 'Are you sure you want to change the payroll interval?',
+          onConfirm: () => updateSalary && updateSalary('interval', Number((document.querySelector('input[type=number]') as HTMLInputElement)?.value))
+        })}>Set</button>
+      </div>
+
+      <div style={{ marginTop:12 }}>
+        <strong>Employees</strong>
+        <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:6 }}>
+          {employees.map((emp:any) => (
+            <div key={emp.id} style={{ display:'flex', gap:8, alignItems:'center', border:'1px solid #eee', padding:6, borderRadius:6 }}>
+              <div style={{ flex:1, color: darkMode ? '#fff' : '#222' }}>{emp.name} <small style={{ color:'#666' }}>({emp.role})</small></div>
+              <div>
+                <input type="number" defaultValue={emp.salary || 0} id={`salary-${emp.id}`} style={inputStyle} />
+                <button style={buttonStyle} onClick={() => {
+                  const el = document.getElementById(`salary-${emp.id}`) as HTMLInputElement|null;
+                  const val = el ? Number(el.value) : 0;
+                  updateSalary(emp.id, val);
+                }}>Set</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,36 @@
+﻿import React from 'react';
+
+export function BankruptcyModal({ open, funds, onLoan, onInvestor, onRollback }: { open:boolean, funds:number, onLoan: (amt:number)=>void, onInvestor: ()=>void, onRollback: ()=>void }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card">
+        <div className="modal-header">
+          <div>
+            <p className="menu-eyebrow" style={{ marginBottom: 4 }}>Crisis mode</p>
+            <h2 style={{ margin: 0 }}>Bankruptcy alert</h2>
+          </div>
+          <span className="pill">Funds {funds.toFixed(2)}</span>
+        </div>
+        <p>Your cash reserves dipped below zero. Choose a lifeline to keep operations running.</p>
+        <div className="option-grid">
+          <div className="option-card">
+            <h4>Take a short loan</h4>
+            <p>Receive +2000 now and deal with higher interest later.</p>
+            <button onClick={() => onLoan(2000)}>Take loan</button>
+          </div>
+          <div className="option-card">
+            <h4>Seek investor</h4>
+            <p>Secure a one-time +5000 equity injection.</p>
+            <button onClick={onInvestor}>Pitch investor</button>
+          </div>
+          <div className="option-card">
+            <h4>Rollback payroll</h4>
+            <p>Undo the last payroll payout if available.</p>
+            <button onClick={onRollback}>Rollback</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

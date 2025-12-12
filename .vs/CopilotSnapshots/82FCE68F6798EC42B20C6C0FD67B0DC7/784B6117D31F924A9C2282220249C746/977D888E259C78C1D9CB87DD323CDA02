@@ -1,0 +1,30 @@
+﻿import React from 'react';
+import { Contract } from '../../models/contract';
+import { Role } from '../../models/project';
+
+export function ContractsPanel({ contracts, onAccept }: {
+ contracts: Contract[],
+ onAccept: (id: string) => void
+}) {
+ return (
+ <div style={{ border: '1px solid #ccc', borderRadius:6, padding:10, background: '#f9f9ff', marginBottom:12 }}>
+ <h3>Available Contracts</h3>
+ {contracts.length ===0 && <div style={{ color: '#777' }}>No contracts available</div>}
+ {contracts.map(contract => (
+ <div key={contract.id} style={{ borderBottom: '1px solid #eee', marginBottom:8, paddingBottom:8 }}>
+ <div><strong>{contract.name}</strong> <small>({contract.status})</small></div>
+ <div style={{ fontSize:13, color: '#555' }}>{contract.description}</div>
+ <div>Reward: <strong>{contract.reward}</strong></div>
+ <div>Deadline: {new Date(contract.deadline).toLocaleDateString()}</div>
+ <div>Roles: {contract.requiredRoles.join(', ')}</div>
+ {contract.status === 'available' && (
+ <button style={{ marginTop:4 }} onClick={() => onAccept(contract.id)}>Accept contract</button>
+ )}
+ {contract.status === 'accepted' && <span style={{ color: '#0a0' }}>Accepted</span>}
+ {contract.status === 'completed' && <span style={{ color: '#00a' }}>Completed</span>}
+ {contract.status === 'expired' && <span style={{ color: '#a00' }}>Expired</span>}
+ </div>
+ ))}
+ </div>
+ );
+}

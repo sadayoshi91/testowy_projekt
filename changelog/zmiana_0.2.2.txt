@@ -1,0 +1,7 @@
+Zmiana0.2.2
+
+- Dodano panel badañ i rozwoju (R&D)
+- Mo¿liwoœæ inwestowania w badania (p³acenie kosztu)
+- Automatyczne koñczenie badañ po up³ywie dni gry i inwestycji
+- Odblokowywanie nowych typów projektów, technologii, bonusów
+- Nowa zak³adka R&D w menu

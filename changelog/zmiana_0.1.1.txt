@@ -1,0 +1,5 @@
+Zmiana 0.1.1
+
+- Dodano pole status do modelu Project (active, completed, paused)
+- Przygotowanie pod UI do zmiany statusu projektu
+- Planowane: sortowanie, filtrowanie, historia zmian, system kontraktów/szkoleñ

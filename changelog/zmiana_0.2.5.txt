@@ -1,0 +1,7 @@
+Zmiana0.2.5
+
+- Dodano system losowych eventów: kryzysy, bonusy, zmiany rynku, wp³yw na morale, produktywnoœæ, finanse, reputacjê
+- Dodano panel eventów (Events) w menu
+- Dodano system awansów: pracownicy zdobywaj¹ doœwiadczenie, awansuj¹ na mid/senior, wzrost produktywnoœci, morale, pensji, wpis do event loga
+- Dodano panel statystyk (Stats): œrednia produktywnoœæ, morale, fundusze, liczba projektów, historia zmian
+- Wszystkie funkcje zintegrowane z tickCallback i UI

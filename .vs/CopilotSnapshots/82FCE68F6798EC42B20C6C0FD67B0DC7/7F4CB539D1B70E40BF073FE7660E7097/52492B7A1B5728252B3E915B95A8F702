@@ -1,0 +1,32 @@
+﻿// src/app/components/EmployeesList.tsx
+import React from 'react';
+import { Employee } from '../../models/employee';
+
+export function EmployeesList({ employees }: { employees: Employee[] }) {
+    return (
+        <div style={{ border: '1px solid #ccc', borderRadius: 6, padding: 8, background: '#fff', marginBottom: 8 }}>
+            {employees.length === 0 && <div style={{ color: '#777' }}>No employees</div>}
+            {employees.map(emp => (
+                <div key={emp.id} style={{ borderBottom: '1px solid #eee', marginBottom: 8, paddingBottom: 8 }}>
+                    <div>
+                        <strong>{emp.name}</strong> <small>({emp.role})</small>{' '}
+                        <span style={{ color: '#888', fontSize: 12 }}>{emp.level}</span>
+                    </div>
+                    <div style={{ fontSize: 13, color: '#555' }}>
+                        Prod: {emp.productivity} • Morale: {emp.morale}
+                    </div>
+                    {emp.unlockedRoles && emp.unlockedRoles.length > 0 && (
+                        <div style={{ fontSize: 12, color: '#0a0' }}>
+                            Unlocked roles: {emp.unlockedRoles.join(', ')}
+                        </div>
+                    )}
+                    {emp.trainingHistory && emp.trainingHistory.length > 0 && (
+                        <div style={{ fontSize: 12, color: '#0077cc' }}>
+                            Training history: {emp.trainingHistory.join(', ')}
+                        </div>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+}

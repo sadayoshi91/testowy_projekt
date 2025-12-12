@@ -1,0 +1,84 @@
+﻿// src/simulation/TickManager.ts
+import { CompanyState } from '../models/company';
+
+export type TickCallback = (state: CompanyState) => CompanyState;
+
+export class TickManager {
+    private intervalId: number | null = null;
+    public tickRateMs: number;
+    public callback: TickCallback;
+
+    constructor(callback: TickCallback, tickRateMs = 1000) {
+        this.callback = callback;
+        this.tickRateMs = tickRateMs;
+    }
+
+    /**
+     * start: zaczyna wykonywać tick co tickRateMs.
+     * onUpdate tutaj powinien być React setState (np. setCompany),
+     * ale przekazujemy go w formie funkcji, która przyjmuje updater:
+     *   onUpdate((prev) => newState)
+     *
+     * Dzięki temu TickManager nie trzyma własnego snapshotu i nie nadpisuje zmian w UI.
+     */
+    start(onUpdate: (updater: (prev: CompanyState) => CompanyState) => void) {
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+        this.intervalId = window.setInterval(() => {
+            try {
+                // używamy funkcyjnego updatora Reacta — zapewnia on najświeższy prev state
+                onUpdate((prevState: CompanyState) => {
+                    try {
+                        const next = this.callback(prevState);
+                        return next;
+                    } catch (err) {
+                        console.error('[TickManager] tick callback error (inside updater)', err);
+                        return prevState;
+                    }
+                });
+            } catch (err) {
+                console.error('[TickManager] failed to call onUpdate', err);
+            }
+        }, this.tickRateMs) as unknown as number;
+    }
+
+    stop() {
+        if (!this.intervalId) return;
+        clearInterval(this.intervalId);
+        this.intervalId = null;
+    }
+
+    setTickRate(ms: number, onUpdate?: (updater: (prev: CompanyState) => CompanyState) => void) {
+        this.tickRateMs = ms;
+        if (this.intervalId) {
+            this.stop();
+            if (ms > 0 && onUpdate) {
+                this.start(onUpdate);
+            }
+        }
+    }
+
+    // runNTicks: synchroniczny fast-forward na przekazanym snapshot'cie
+    runNTicks(initialState: CompanyState, ticks: number): CompanyState {
+        let state = initialState;
+        for (let i = 0; i < ticks; i++) {
+            state = this.callback(state);
+        }
+        return state;
+    }
+
+    async runNTicksAsync(initialState: CompanyState, ticks: number, batchSize = 200): Promise<CompanyState> {
+        let state = initialState;
+        let remaining = ticks;
+        while (remaining > 0) {
+            const run = Math.min(batchSize, remaining);
+            for (let i = 0; i < run; i++) state = this.callback(state);
+            remaining -= run;
+            // yield to event loop
+            await new Promise<void>(r => setTimeout(r, 0));
+        }
+        return state;
+    }
+}

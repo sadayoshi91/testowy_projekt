@@ -1,0 +1,36 @@
+﻿import React from 'react';
+import { Employee } from '../../models/employee';
+
+export function StatsPanel({ employees, company, darkMode }: { employees: Employee[], company: any, darkMode?: boolean }) {
+ const panelStyle = {
+ border: '1px solid',
+ borderColor: darkMode ? '#444' : '#ccc',
+ borderRadius:6,
+ padding:10,
+ background: darkMode ? '#232323' : '#fff',
+ color: darkMode ? '#fff' : '#222',
+ marginBottom:12,
+ minHeight:80
+ };
+ const avgProd = employees.length ? (employees.reduce((a, e) => a + (e.productivity ||0),0) / employees.length).toFixed(2) : '0';
+ const avgMorale = employees.length ? (employees.reduce((a, e) => a + (e.morale ||0),0) / employees.length).toFixed(2) : '0';
+ const totalFunds = company.funds ||0;
+ const totalProjects = (company.projects || []).length;
+ return (
+ <div style={panelStyle}>
+ <h3 style={{ color: darkMode ? '#fff' : '#222' }}>Company Stats</h3>
+ <div>Average Productivity: {avgProd}</div>
+ <div>Average Morale: {avgMorale}</div>
+ <div>Total Funds: {totalFunds.toFixed(2)}</div>
+ <div>Total Projects: {totalProjects}</div>
+ <div style={{ marginTop:8 }}>
+ <strong>History:</strong>
+ <ul style={{ fontSize:13, color: darkMode ? '#ccc' : '#555' }}>
+ {(company.events || []).slice(0,10).map((ev:string, idx:number) => (
+ <li key={idx}>{ev}</li>
+ ))}
+ </ul>
+ </div>
+ </div>
+ );
+}

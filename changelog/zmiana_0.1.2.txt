@@ -1,0 +1,6 @@
+Zmiana0.1.2
+
+- Dodano obs³ugê statusu projektu w UI (active, completed, paused)
+- Dodano filtrowanie i sortowanie projektów po statusie, nazwie i dacie utworzenia
+- Dodano mo¿liwoœæ zmiany statusu projektu z poziomu listy
+- Przygotowanie pod rozbudowê systemu eventów/logów i kontraktów/szkoleñ

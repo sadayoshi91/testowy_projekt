@@ -1,0 +1,1279 @@
+﻿import React, { useEffect, useState, useRef } from 'react';
+import { createEmptyCompany } from '../models/company';
+import { TickManager } from '../simulation/TickManager';
+import { HRSystem } from '../systems/HRSystem';
+import { ProjectSystem } from '../systems/ProjectSystem';
+import { EconomySystem } from '../systems/EconomySystem';
+import { ProjectRowEnhanced } from './components/ProjectList_enhanced';
+import { ProjectDetails } from './components/ProjectDetails';
+import { EmployeesList } from './components/EmployeesList';
+import { AssignModal } from './components/AssignModal';
+import { EventLog } from './components/EventLog';
+import { FinancePanel } from './components/FinancePanel';
+import { Toasts, ToastItem } from './components/Toast';
+import { ConfirmationModal } from './components/ConfirmationModal';
+import { BankruptcyModal } from './components/BankruptcyModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { OfficeGrid } from './components/OfficeGrid';
+import { listMods } from '../services/ModLoader';
+import { useEconomy } from './hooks/useEconomy';
+import { usePayrollHelpers } from './hooks/usePayroll';
+import { Project, Role } from '../models/project';
+import { ContractsPanel } from './components/ContractsPanel';
+import { Contract, ContractStatus } from '../models/contract';
+import { TrainingsPanel } from './components/TrainingsPanel';
+import { Training } from '../models/training';
+import { ResearchPanel } from './components/ResearchPanel';
+import { Research } from '../models/research';
+import { FaFileContract, FaTasks, FaUsers, FaChalkboardTeacher, FaMoneyBill, FaListAlt, FaMoon, FaSun } from 'react-icons/fa';
+import { OfficePanel } from './components/OfficePanel';
+import { Office } from '../models/office';
+import { CompetitorsPanel } from './components/CompetitorsPanel';
+import { Competitor } from '../models/competitor';
+import { GameEventsPanel } from './components/GameEventsPanel';
+import { StatsPanel } from './components/StatsPanel';
+import { MissionsPanel } from './components/MissionsPanel';
+import { MainMenu } from './components/MainMenu';
+import { generateContractsBatch } from '../services/ContractGenerator';
+import { OfficeMap } from './components/OfficeMap';
+import './AppLayout.css';
+
+const DEFAULT_ROLES: Role[] = ['developer', 'designer'];
+const DEFAULT_STATUS = 'active';
+
+type ProjectStatus = 'active' | 'completed' | 'paused';
+type EmployeeLevel = 'junior' | 'mid' | 'senior';
+
+const EMPLOYEE_FIRST_NAMES = ['Alex','Maya','Jordan','Nina','Leo','Ivy','Marcus','Sara','Kenji','Ola'];
+const EMPLOYEE_LAST_NAMES = ['Nowak','Kowalski','Lee','Lopez','Singh','Chen','Khan','Novak','Smith','Ivanova'];
+const ROLE_OPTIONS: Role[] = ['developer','designer','marketer','researcher'];
+const LEVEL_OPTIONS: EmployeeLevel[] = ['junior','mid','senior'];
+const SKILL_BY_LEVEL: Record<EmployeeLevel, number> = { junior: 50, mid: 70, senior: 90 };
+const SALARY_BY_LEVEL: Record<EmployeeLevel, number> = { junior: 220, mid: 360, senior: 540 };
+
+const DEFAULT_RESEARCHES: Research[] = [
+  {
+    id: 'res-automation',
+    name: 'Workflow Automation',
+    description: 'Unlocks +10% productivity for developers.',
+    cost: 2500,
+    durationDays: 8,
+    status: 'available',
+    unlocks: ['Automation Suite'],
+  },
+  {
+    id: 'res-ux-lab',
+    name: 'UX Research Lab',
+    description: 'Improves designer morale and unlocks premium UI contracts.',
+    cost: 3200,
+    durationDays: 10,
+    status: 'available',
+    unlocks: ['Premium UI Projects'],
+  },
+  {
+    id: 'res-market-ai',
+    name: 'Market AI Insights',
+    description: 'Unlocks advanced marketing trainings and +5 reputation.',
+    cost: 4000,
+    durationDays: 12,
+    status: 'available',
+    unlocks: ['Marketing AI Toolkit'],
+  },
+];
+
+const pickRandom = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+const App: React.FC = () => {
+  const [company, setCompany] = useState<any>(createEmptyCompany());
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [confirmProps, setConfirmProps] = useState<any>(null);
+  const [bankruptOpen, setBankruptOpen] = useState(false);
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [newProject, setNewProject] = useState({
+    name: '',
+    description: '',
+    effort:100,
+    reward:1000,
+    requiredRoles: DEFAULT_ROLES,
+  });
+  const [editProjectId, setEditProjectId] = useState<string|null>(null);
+  const [editProject, setEditProject] = useState<any>(null);
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [sortKey, setSortKey] = useState<string>('createdAt');
+  const [activeTab, setActiveTab] = useState<string>('contracts');
+  const [darkMode, setDarkMode] = useState(false);
+  const [tickSpeed, setTickSpeed] = useState(1000); // domyślnie x1
+  const [gameHour, setGameHour] = useState(8); // start od8:00
+  const [gameDay, setGameDay] = useState(1);
+  const [showMainMenu, setShowMainMenu] = useState(true);
+  const [showOptionsOverlay, setShowOptionsOverlay] = useState(false);
+  const [canContinue, setCanContinue] = useState(false);
+  const [newHireName, setNewHireName] = useState('');
+  const [newHireRole, setNewHireRole] = useState<Role>('developer');
+  const [newHireLevel, setNewHireLevel] = useState<EmployeeLevel>('junior');
+  const [newHireSalary, setNewHireSalary] = useState<number>(SALARY_BY_LEVEL['junior']);
+
+  const tickManagerRef = useRef<any>(null);
+  const hrRef = useRef<any>(null);
+  const projectRef = useRef<any>(null);
+  const econRef = useRef<any>(null);
+  const economy = useEconomy(company, setCompany); 
+  const getCompany = () => company;
+  const { runPayroll: backupPayroll, exportPayroll: exportPayrollIPC } = usePayrollHelpers(setCompany, getCompany, (t: any) => {
+        
+        pushToast(t);
+    });
+  
+
+  const menuTabs = [
+    { key: 'contracts', label: 'Contracts', icon: <FaFileContract /> },
+    { key: 'projects', label: 'Projects', icon: <FaTasks /> },
+    { key: 'employees', label: 'Employees', icon: <FaUsers /> },
+    { key: 'trainings', label: 'Trainings', icon: <FaChalkboardTeacher /> },
+    { key: 'rnd', label: 'R&D', icon: <FaListAlt /> },
+    { key: 'office', label: 'Office', icon: <FaUsers /> },
+    { key: 'competitors', label: 'Competitors', icon: <FaListAlt /> },
+    { key: 'events', label: 'Events', icon: <FaListAlt /> },
+    { key: 'missions', label: 'Missions', icon: <FaListAlt /> },
+    { key: 'stats', label: 'Stats', icon: <FaListAlt /> },
+    { key: 'finance', label: 'Finance', icon: <FaMoneyBill /> },
+    { key: 'log', label: 'Log', icon: <FaListAlt /> },
+  ];
+
+  if (!hrRef.current) hrRef.current = new HRSystem();
+  if (!projectRef.current) projectRef.current = new ProjectSystem();
+  if (!econRef.current) econRef.current = new EconomySystem(company?.payrollIntervalDays || 30);
+
+  const pushToast = (t: Omit<ToastItem, 'id'>) => {
+    const id = (Date.now()).toString(36) + Math.random().toString(36).slice(2,6);
+    setToasts(s => [{ id, ...t }, ...s].slice(0, 6));
+  };
+
+  const openConfirmation = (props:any) => {
+    setConfirmProps(props);
+  };
+
+  useEffect(() => {
+    (async () => {
+      const m = await listMods();
+    })();
+  }, []);
+
+  const pushEvent = (msg: string) => {
+    const stamp = new Date().toLocaleTimeString();
+    setCompany((c:any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
+  };
+
+  const pushProjectEvent = (msg: string) => {
+    const stamp = new Date().toLocaleTimeString();
+    setCompany((c: any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
+  };
+
+  // Dodaj przykładowe biura do stanu początkowego, jeśli nie istnieją
+React.useEffect(() => {
+ if (!company.offices || company.offices.length ===0) {
+ setCompany((c: any) => ({
+ ...c,
+ offices: [
+ {
+ id: 'office1',
+ name: 'Small Office',
+ rent:500,
+ desks: [
+ { id: 'desk1', name: 'Desk1' },
+ { id: 'desk2', name: 'Desk2' }
+ ],
+ upgrades: [],
+ owned: false
+ },
+ {
+ id: 'office2',
+ name: 'Large Office',
+ rent:1500,
+ desks: [
+ { id: 'desk3', name: 'Desk3' },
+ { id: 'desk4', name: 'Desk4' },
+ { id: 'desk5', name: 'Desk5' }
+ ],
+ upgrades: [],
+ owned: false
+ }
+ ]
+ }));
+ }
+// eslint-disable-next-line
+}, []);
+
+React.useEffect(() => {
+ if (!company.contracts || company.contracts.length ===0) {
+ setCompany((c: any) => ({
+ ...c,
+ contracts: [
+ { id: 'contract1', name: 'Basic Website', reward:2000, deadline: new Date(Date.now() +7*24*60*60*1000).toISOString(), requiredRoles: ['developer'], status: 'available', createdAt: new Date().toISOString(), minReputation:0 },
+ { id: 'contract2', name: 'Corporate Portal', reward:5000, deadline: new Date(Date.now() +10*24*60*60*1000).toISOString(), requiredRoles: ['developer', 'designer'], status: 'available', createdAt: new Date().toISOString(), minReputation:120 },
+ { id: 'contract3', name: 'Mobile App', reward:8000, deadline: new Date(Date.now() +14*24*60*60*1000).toISOString(), requiredRoles: ['developer', 'designer'], status: 'available', createdAt: new Date().toISOString(), minReputation:150 }
+ ]
+ }));
+ }
+// eslint-disable-next-line
+}, []);
+
+useEffect(() => {
+  setCompany((c: any) => {
+    if (c.researches && c.researches.length > 0) return c;
+    return { ...c, researches: DEFAULT_RESEARCHS.map(r => ({ ...r })) };
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+// Efekty ulepszeń na produktywność/morale (w tickCallback)
+const applyOfficeEffects = (state: any) => {
+ let updated = { ...state };
+ (updated.offices || []).forEach((office: any) => {
+ if (!office.owned) return;
+ (office.desks || []).forEach((desk: any) => {
+ if (!desk.assignedEmployeeId) return;
+ const emp = (updated.employees || []).find((e: any) => e.id === desk.assignedEmployeeId);
+ if (!emp) return;
+ (desk.upgrades || []).forEach((upg: any) => {
+ if (upg.effect?.productivity) emp.productivity += upg.effect.productivity;
+ if (upg.effect?.morale) emp.morale += upg.effect.morale;
+ });
+ });
+ });
+ return updated;
+};
+
+  // System awansów: pracownicy zdobywają doświadczenie, mogą awansować
+  function processPromotions(state: any) {
+    let updated = { ...state };
+    updated.employees = (updated.employees || []).map((e: any) => {
+      let exp = e.experience ||0;
+      exp +=1; // zdobywaj exp co tick
+      let level = e.level;
+      let prod = e.productivity;
+      let morale = e.morale;
+      let salary = e.salary;
+      if (exp >=50 && level === 'junior') {
+        level = 'mid'; prod +=10; morale +=5; salary +=100;
+        updated.events = [`${new Date().toLocaleTimeString()} — PROMOTION: ${e.name} awansował na mid!`, ...(updated.events || [])];
+      }
+      if (exp >=120 && level === 'mid') {
+        level = 'senior'; prod +=15; morale +=10; salary +=200;
+        updated.events = [`${new Date().toLocaleTimeString()} — PROMOTION: ${e.name} awansował na senior!`, ...(updated.events || [])];
+      }
+      return { ...e, experience: exp, level, productivity: prod, morale, salary };
+    });
+    return updated;
+  }
+
+  useEffect(() => {
+    if (tickManagerRef.current) {
+      tickManagerRef.current.setTickRate(tickSpeed, (s:any)=> setCompany(s));
+    }
+  }, [tickSpeed]);
+
+  // sort & filter projects
+  const filteredSortedProjects = (company.projects || [])
+    .filter((p: any) => filterStatus === 'all' || p.status === filterStatus)
+    .sort((a: any, b: any) => {
+      if (sortKey === 'name') return a.name.localeCompare(b.name);
+      if (sortKey === 'status') return (a.status || '').localeCompare(b.status || '');
+      if (sortKey === 'createdAt') return (a.createdAt || '').localeCompare(b.createdAt || '');
+      return 0;
+    });
+
+  const filteredSortedContracts = (company.contracts || [])
+    // .filter((p: any) => filterStatus === 'all' || p.status === filterStatus)
+    // .sort((a: any, b: any) => {
+    //   if (sortKey === 'name') return a.name.localeCompare(b.name);
+    //   if (sortKey === 'status' ) return (a.status || '').localeCompare(b.status || '');
+    //   if (sortKey === 'createdAt' ) return (a.createdAt || '').localeCompare(b.createdAt || '');
+    //   return 0;
+    // });
+
+  const renderContractsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Contracts</h2>
+      </div>
+      <ContractsPanel
+        contracts={company.contracts || []}
+        onAccept={handleAcceptContract}
+        darkMode={darkMode}
+      />
+    </section>
+  );
+
+  const renderProjectsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Projects</h2>
+        <button className="accent" onClick={() => setShowAddProject(true)}>Add Project</button>
+      </div>
+      <div>
+        {filteredSortedProjects.map((project: Project) => (
+          <ProjectRowEnhanced
+            key={project.id}
+            project={project}
+            onEdit={() => handleEditProject(project)}
+            onDelete={() => handleDeleteProject(project.id)}
+            onStatusChange={(status) => handleStatusChange(project.id, status)}
+            onAssign={(empId) => assignToProject(project.id, empId)}
+            onUnassign={(empId) => unassignSpecific(project.id, empId)}
+            darkMode={darkMode}
+          />
+        ))}
+      </div>
+      {filteredSortedProjects.length === 0 && <p>No projects found</p>}
+    </section>
+  );
+
+  const renderEmployeesTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Employees</h2>
+      </div>
+      <div style={{ border: '1px solid #ccc', borderRadius: 8, padding: 12, marginBottom: 12, background: darkMode ? '#1f1f1f' : '#fff', color: darkMode ? '#fff' : '#222' }}>
+        <h3>Hire talent</h3>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <input
+            type="text"
+            placeholder="Name"
+            value={newHireName}
+            onChange={e => setNewHireName(e.target.value)}
+            style={{ flex: '1 1 140px', padding: 6, borderRadius: 6, border: '1px solid #888' }}
+          />
+          <select
+            value={newHireRole}
+            onChange={e => setNewHireRole(e.target.value as Role)}
+            style={{ padding: 6, borderRadius: 6 }}
+          >
+            {ROLE_OPTIONS.map(role => (
+              <option key={role} value={role}>{role}</option>
+            ))}
+          </select>
+          <select
+            value={newHireLevel}
+            onChange={e => {
+              const level = e.target.value as EmployeeLevel;
+              setNewHireLevel(level);
+              setNewHireSalary(SALARY_BY_LEVEL[level]);
+            }}
+            style={{ padding: 6, borderRadius: 6 }}
+          >
+            {LEVEL_OPTIONS.map(level => (
+              <option key={level} value={level}>{level}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={100}
+            value={newHireSalary}
+            onChange={e => setNewHireSalary(Number(e.target.value))}
+            style={{ width: 120, padding: 6, borderRadius: 6 }}
+          />
+          <button onClick={handleHireSubmit} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#4caf50', color: '#fff' }}>Hire</button>
+        </div>
+        <small style={{ color: darkMode ? '#aaa' : '#666' }}>Salary and skill scale with level; leave name empty for a random candidate.</small>
+      </div>
+      <EmployeesList employees={company.employees || []} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderTrainingsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Trainings</h2>
+      </div>
+      <ErrorBoundary>
+        <TrainingsPanel trainings={company.trainings || []} employees={company.employees || []} onStart={handleStartTraining} darkMode={darkMode} />
+      </ErrorBoundary>
+    </section>
+  );
+
+  const renderResearchTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>R&D</h2>
+      </div>
+      <ResearchPanel researches={company.researches || []} onStart={handleStartResearch} onInvest={handleInvestResearch} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderFinanceTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Finance</h2>
+      </div>
+      <FinancePanel company={company} nextPayoutDays={econRef.current?.nextPayoutInDays(company)} runPayrollNow={runPayrollNow} exportPayroll={exportPayroll} updateSalary={updateSalary} openConfirmation={openConfirmation} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderLogTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Event Log</h2>
+      </div>
+      <EventLog events={(company.events || [])} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderCompetitorsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Competitors</h2>
+      </div>
+      <CompetitorsPanel competitors={company.competitors || []} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderMissionsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Missions</h2>
+      </div>
+      <MissionsPanel missions={company.missions || []} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderStatsTab = () => (
+    <section className="panel-card">
+      <div className="panel-header">
+        <h2>Company Stats</h2>
+      </div>
+      <StatsPanel employees={company.employees || []} company={company} darkMode={darkMode} />
+    </section>
+  );
+
+  const renderActiveTab = () => {
+    switch (activeTab) {
+      case 'contracts':
+        return renderContractsTab();
+      case 'projects':
+        return renderProjectsTab();
+      case 'employees':
+        return renderEmployeesTab();
+      case 'trainings':
+        return renderTrainingsTab();
+      case 'rnd':
+        return renderResearchTab();
+      case 'finance':
+        return renderFinanceTab();
+      case 'log':
+        return renderLogTab();
+      case 'office':
+        return (
+          <OfficePanel offices={company.offices || []} employees={company.employees || []} onRent={handleRentOffice} onAssignDesk={handleAssignDesk} onUpgradeDesk={handleUpgradeDesk} darkMode={darkMode} />
+        );
+      case 'competitors':
+        return renderCompetitorsTab();
+      case 'events':
+        return (
+          <GameEventsPanel events={company.gameEvents || []} darkMode={darkMode} />
+        );
+      case 'missions':
+        return renderMissionsTab();
+      case 'stats':
+        return (
+          <StatsPanel employees={company.employees || []} company={company} darkMode={darkMode} />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const handlePause = () => {
+    setTickSpeed(0);
+    tickManagerRef.current?.stop();
+  };
+  const handleNormal = () => {
+    setTickSpeed(1000);
+  };
+  const handleMedium = () => {
+    setTickSpeed(333);
+  };
+  const handleFast = () => {
+    setTickSpeed(200);
+  };
+  const handleStart = () => {
+    if (tickManagerRef.current) {
+      setTickSpeed(1000); // domyślna prędkość
+      tickManagerRef.current.stop();
+      tickManagerRef.current.start((s: any) => {
+        setCompany(s);
+      });
+    }
+  };
+
+  const handleSaveGame = async () => {
+    if (typeof window === 'undefined') return;
+    const saveName = window.prompt('Enter save name', 'autosave');
+    if (!saveName) return;
+    try {
+      const payload = JSON.stringify(company);
+      if (window.electronAPI?.saveFile) {
+        const res = await window.electronAPI.saveFile(saveName, payload);
+        if (!res?.success) throw new Error(res?.error || 'Unknown error');
+        pushToast({ type: 'success', message: `Game saved: ${saveName}` });
+      } else {
+        localStorage.setItem(`save_${saveName}`, payload);
+        pushToast({ type: 'success', message: `Game saved locally: ${saveName}` });
+      }
+      if (saveName === 'autosave') setCanContinue(true);
+    } catch (err: any) {
+      console.error('Save game error', err);
+      pushToast({ type: 'error', message: `Save failed: ${err?.message || err}` });
+    }
+  };
+
+  const handleLoadGame = async (presetName?: string, options?: { silent?: boolean }): Promise<boolean> => {
+    if (typeof window === 'undefined') return false;
+    let saveName = presetName;
+    if (!saveName) {
+      if (options?.silent) return false;
+      const promptResult = window.prompt('Enter save name to load', 'autosave');
+      if (!promptResult) return false;
+      saveName = promptResult;
+    }
+    try {
+      let data: string | null = null;
+      if (window.electronAPI?.loadFile) {
+        const res = await window.electronAPI.loadFile(saveName);
+        if (!res?.success) throw new Error(res?.error || 'Unknown error');
+        data = typeof res.data === 'string' ? res.data : null;
+      } else {
+        data = localStorage.getItem(`save_${saveName}`);
+      }
+      if (!data) throw new Error('Save not found');
+      const parsed = JSON.parse(data);
+      const withMeta = {
+        ...parsed,
+        nextContractRefreshDay: parsed.nextContractRefreshDay ?? parsed.day ?? 1,
+        lastContractRefreshDay: parsed.lastContractRefreshDay ?? parsed.day ?? 0,
+      };
+      const needsContracts = !withMeta.contracts || withMeta.contracts.every((c: any) => c.status === 'accepted');
+      const hydrated = needsContracts ? refreshContracts(withMeta, true) : withMeta;
+      setCompany(hydrated);
+      setCanContinue(true);
+      if (!options?.silent) {
+        pushToast({ type: 'success', message: `Game loaded: ${saveName}` });
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Load game error', err);
+      if (!options?.silent) {
+        pushToast({ type: 'error', message: `Load failed: ${err?.message || err}` });
+      }
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    const detectAutosave = async () => {
+      try {
+        if (typeof window === 'undefined') return;
+        if (window.electronAPI?.loadFile) {
+          const res = await window.electronAPI.loadFile('autosave');
+          if (res?.success && res.data) setCanContinue(true);
+        } else if (localStorage.getItem('save_autosave')) {
+          setCanContinue(true);
+        }
+      } catch (err) {
+        console.warn('Autosave detection failed', err);
+      }
+    };
+    detectAutosave();
+  }, []);
+
+
+  function filterContractsByReputation(state: any) {
+    let updated = { ...state };
+    const reputation = updated.reputation ??100;
+    updated.contracts = (updated.contracts || []).map((ct: any) => {
+      if (ct.minReputation && reputation < ct.minReputation) {
+        return { ...ct, status: 'locked' };
+      }
+      if (ct.status === 'locked' && reputation >= (ct.minReputation ||0)) {
+        return { ...ct, status: 'available' };
+      }
+      return ct;
+    });
+    return updated;
+  }
+
+  // Rozbudowa relacji z konkurencją na podstawie reputacji
+function updateCompetitorRelations(state: any) {
+ let updated = { ...state };
+ const reputation = updated.reputation ??100;
+ updated.competitors = (updated.competitors || []).map((comp: any) => {
+ let relation = 'neutral';
+ if (reputation > comp.reputation +20) relation = 'admire';
+ else if (reputation < comp.reputation -20) relation = 'ignore';
+ else if (Math.abs(reputation - comp.reputation) <=20) relation = 'rival';
+ return { ...comp, relation };
+ });
+ return updated;
+}
+
+function updateMissions(state: any) {
+ let updated = { ...state };
+ updated.missions = (updated.missions || []).map((m: any) => {
+ let progress = m.progress;
+ if (m.type === 'reputation') progress = updated.reputation ||0;
+ if (m.type === 'projects_completed') progress = (updated.projects || []).filter((p: any) => p.status === 'completed').length;
+ if (m.type === 'funds') progress = updated.funds ||0;
+ if (m.type === 'employees_hired') progress = (updated.employees || []).length;
+ const completed = !m.completed && progress >= m.target;
+ if (completed) {
+ updated.events = [`${new Date().toLocaleTimeString()} — MISSION COMPLETE: ${m.description}`, ...(updated.events || [])];
+ if (m.reward?.funds) updated.funds = (updated.funds ||0) + m.reward.funds;
+ if (m.reward?.reputation) updated.reputation = (updated.reputation ||0) + m.reward.reputation;
+ }
+ return { ...m, progress, completed: m.completed || completed };
+ });
+ return updated;
+}
+
+  const tickCallback = (state: any): any => {
+    const hr = hrRef.current!;
+    const ps = projectRef.current!;
+    const econ = econRef.current!;
+    let updated = hr.tickCompany(state);
+    updated = ps.tickProjects(updated);
+    updated = econ.tickEconomy(updated);
+    updated = applyOfficeEffects(updated);
+    updated = maybeTriggerEvent(updated);
+    updated = processPromotions(updated);
+    updated = updateMissions(updated);
+    updated = filterContractsByReputation(updated);
+    updated = updateCompetitorRelations(updated);
+    updated = refreshContracts(updated);
+
+    // Zmieniamy logikę czasu gry:1 tick =1 godzina
+    let hour = (state.gameHour ?? gameHour) +1;
+    let day = state.gameDay ?? gameDay;
+    if (hour >23) {
+      hour =0;
+      day +=1;
+    }
+    updated.gameHour = hour;
+    updated.gameDay = day;
+
+    const empIncome = (updated.employees || []).reduce((acc:number, e:any) => {
+      if ((e as any).onBreak) return acc;
+      return acc + (e.productivity ||0);
+    },0);
+    updated.funds = +( (updated.funds ||0) + empIncome ).toFixed(2);
+    updated.day = day; // day = liczba dni gry
+
+    if ((updated.funds ||0) < -1000) {
+      try { tickManagerRef.current?.stop(); } catch(e){}
+      setBankruptOpen(true);
+      pushToast({ type:'warning', title:'Bankruptcy', message:'Funds critically low, paused' });
+    }
+
+    return updated;
+  };
+
+  useEffect(() => {
+    tickManagerRef.current = new TickManager(tickCallback, 1000);
+    return () => tickManagerRef.current?.stop();
+  }, []);
+
+  const hire = (name='Dev', role:'developer'|'designer'|'marketer'|'researcher'='developer', level='junior', skill=50, salary=160) => {
+    const hr = hrRef.current!;
+    const emp = hr.hireEmployee(name, role as any, level as any, skill);
+    (emp as any).salary = salary;
+    setCompany((c:any) => ({ ...c, employees: [...(c.employees||[]), emp] });
+    pushToast({ type:'success', title:'Hire', message:`${emp.name} hired` });
+  };
+
+  const randomEmployeeName = () => `${pickRandom(EMPLOYEE_FIRST_NAMES)} ${pickRandom(EMPLOYEE_LAST_NAMES)}`;
+
+  const handleHireSubmit = () => {
+    const level = newHireLevel;
+    const salary = Math.max(80, newHireSalary || SALARY_BY_LEVEL[level]);
+    const skill = SKILL_BY_LEVEL[level];
+    const name = newHireName.trim() || randomEmployeeName();
+    hire(name, newHireRole, level, skill, salary);
+    setNewHireName('');
+    setNewHireSalary(SALARY_BY_LEVEL[level]);
+  };
+
+
+  const assignToProject = (projectId:string, employeeId?:string) => {
+    const p = (company.projects||[]).find((x:any)=>x.id===projectId);
+    if (!p) return;
+    if (employeeId) {
+      const emp = company.employees.find((e:any)=> e.id === employeeId);
+      if (!emp) { pushToast({ type:'error', message:'Employee not found' }); return; }
+      if ((p.assignees||[]).includes(employeeId)) { pushToast({ type:'warning', message:'Already assigned' }); return; }
+      setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), employeeId]}: pr) }));
+      pushToast({ type:'info', message: `${emp.name} assigned` });
+      return;
+    }
+    const free = (company.employees||[]).find((e:any)=> !(p.assignees||[]).includes(e.id));
+    if (!free) { pushToast({ type:'warning', message:'No free employee' }); return; }
+    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), free.id]}: pr) }));
+    pushToast({ type:'info', message: `${free.name} auto-assigned` });
+  };
+
+  const unassignSpecific = (projectId:string, employeeId:string) => {
+    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: (pr.assignees||[]).filter((x:any)=> x!==employeeId)}: pr) }));
+  };
+
+  const fastForward = (n:number) => {
+    if (!tickManagerRef.current) return;
+    const snapshot = ('structuredClone' in window) ? (window as any).structuredClone(company) : JSON.parse(JSON.stringify(company));
+    const res = tickManagerRef.current.runNTicks(snapshot, n);
+    setCompany(res);
+  };
+
+    const runPayrollNow = () => {
+        // use economy hook to run payroll (this will update company via setCompany)
+        const res = economy.runPayrollNow();
+        // start autosave/backup/export tasks
+        try { backupPayroll(); } catch (e) { /* ignore */ }
+        // open bankruptcy modal if needed
+        if ((res?.funds || 0) < -1000) setBankruptOpen(true);
+    };
+
+
+    const exportPayroll = () => {
+        // delegate to payroll helper which handles IPC and toasts
+        exportPayrollIPC();
+    };
+
+
+  const updateSalary = (empId:string, salary:number) => {
+    setCompany((c:any)=> ({ ...c, employees: (c.employees||[]).map((e:any)=> e.id===empId? {...e, salary}: e) }));
+    pushToast({ type:'info', message:'Salary updated' });
+  };
+
+  const handleLoan = (amt:number) => {
+    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + amt }));
+    setBankruptOpen(false);
+    pushToast({ type:'success', message: `Loan: +${amt}` });
+  };
+
+  const handleInvestor = () => {
+    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + 5000 }));
+    setBankruptOpen(false);
+    pushToast({ type:'success', message: 'Investor +5000' });
+  };
+
+  const handleRollback = () => {
+    setCompany((c:any)=> {
+      const h = c.payrollHistory || [];
+      if (h.length === 0) { pushToast({ type:'warning', message:'No payroll to rollback' }); return c; }
+      const last = h[0];
+      const funds = (c.funds||0) + (last.total || 0);
+      return { ...c, funds, payrollHistory: h.slice(1) };
+    });
+    setBankruptOpen(false);
+    pushToast({ type:'success', message:'Last payroll rolled back' });
+  };
+
+  // Funkcja do obsługi dodawania projektu
+  const handleAddProject = () => {
+    if (!newProject.name.trim()) {
+      pushToast({ type: 'error', message: 'Project name required' });
+      return;
+    }
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    setCompany((c: any) => ({
+      ...c,
+      projects: [
+        ...(c.projects || []),
+        {
+          id,
+          name: newProject.name,
+          description: newProject.description,
+          effort: Number(newProject.effort),
+          progress:0,
+          reward: Number(newProject.reward),
+          requiredRoles: newProject.requiredRoles,
+          assignees: [],
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }));
+    setShowAddProject(false);
+    setNewProject({ name: '', description: '', effort:100, reward:1000, requiredRoles: DEFAULT_ROLES });
+    pushToast({ type: 'success', message: 'Project created' });
+    pushProjectEvent(`Project created: ${newProject.name}`);
+  };
+
+  // Funkcja do obsługi edytacji projektu
+  const handleEditProject = (project: Project) => {
+    setEditProjectId(project.id);
+    setEditProject({ ...project });
+    setShowAddProject(false);
+   };
+
+   const handleEditProjectSave = () => {
+    if (!editProject.name.trim()) {
+      pushToast({ type: 'error', message: 'Project name required' });
+      return;
+    }
+    setCompany((c: any) => ({
+      ...c,
+      projects: (c.projects || []).map((p: Project) =>
+        p.id === editProjectId ? { ...editProject } : p
+      ),
+    }));
+    setEditProjectId(null);
+    setEditProject(null);
+    pushToast({ type: 'success', message: 'Project updated' });
+    pushProjectEvent(`Project updated: ${editProject.name}`);
+   };
+
+   const handleEditProjectCancel = () => {
+    setEditProjectId(null);
+    setEditProject(null);
+   };
+
+  // Funkcja do obsługi usuwania projektu
+  const handleDeleteProject = (projectId: String) => {
+    if (!window.confirm('Are you sure you want to delete this project?')) return;
+    setCompany((c: any) => ({
+      ...c,
+      projects: (c.projects || []).filter((p: Project) => p.id !== projectId),
+    }));
+    pushToast({ type: 'success', message: 'Project deleted' });
+    pushProjectEvent(`Project deleted: ${projectId}`);
+  };
+
+  const handleStatusChange = (projectId: string, status: string) => {
+    setCompany((c: any) => ({
+      ...c,
+      projects: (c.projects || []).map((p: any) =>
+        p.id === projectId ? { ...p, status } : p
+      ),
+    }));
+    pushToast({ type: 'info', message: `Status changed to ${status}` });
+    const p = (company.projects||[]).find((x:any)=>x.id===projectId);
+    if (p) {
+      pushProjectEvent(`Project status changed: ${p.name} → ${status}`);
+    }
+  };
+
+  // Obsługa rozpoczęcia szkolenia
+const handleStartTraining = (trainingId: string, employeeId: string) => {
+  setCompany((c: any) => {
+    const training = (c.trainings || []).find((tr: Training) => tr.id === trainingId);
+    if (!training || training.status !== 'available') return c;
+    return {
+      ...c,
+      trainings: (c.trainings || []).map((tr: Training) =>
+        tr.id === trainingId ? { ...tr, status: 'in_progress', assignedEmployeeId: employeeId, startedAt: new Date().toISOString(), startedDay: c.day } : tr
+      ),
+      employees: (c.employees || []).map((e: any) =>
+        e.id === employeeId ? { ...e, onTraining: true } : e
+      ),
+    };
+  });
+  pushToast({ type: 'info', message: 'Training started' });
+  pushProjectEvent(`Training started: ${trainingId} for employee ${employeeId}`);
+};
+
+// Obsługa rozpoczęcia badania
+const handleStartResearch = (researchId: string) => {
+  setCompany((c: any) => ({
+    ...c,
+    researches: (c.researches || []).map((r: Research) =>
+      r.id === researchId ? { ...r, status: 'in_progress', startedDay: c.day } : r
+    )
+  }));
+  pushToast({ type: 'info', message: 'Research started' });
+  pushProjectEvent(`Research started: ${researchId}`);
+};
+
+// Obsługa inwestowania w badanie (płacenie kosztu)
+const handleInvestResearch = (researchId: string) => {
+  setCompany((c: any) => {
+    const research = (c.researches || []).find((r: Research) => r.id === researchId);
+    if (!research || research.status !== 'in_progress') return c;
+    if ((c.funds ||0) < research.cost) {
+      pushToast({ type: 'error', message: 'Not enough funds for research!' });
+      return c;
+    }
+    return {
+      ...c,
+      funds: (c.funds ||0) - research.cost,
+      researches: (c.researches || []).map((r: Research) =>
+        r.id === researchId ? { ...r, invested: true } : r
+      )
+    };
+  });
+  pushToast({ type: 'success', message: 'Research investment paid' });
+};
+
+
+// Losowe eventy w tickCallback
+const randomEvents = [
+ {
+ type: 'crisis', title: 'Market Crash', description: 'Global market crash affects your company!', effect: { funds: -2000, reputation: -10 }
+ },
+ {
+ type: 'bonus', title: 'Tech Grant', description: 'You received a government tech grant!', effect: { funds:3000, reputation:5 }
+ },
+ {
+ type: 'market_change', title: 'Trend Shift', description: 'Market trends shift, designers are in demand!', effect: { morale:10, productivity:5 }
+ },
+ {
+ type: 'random', title: 'Team Building', description: 'Successful team building event boosts morale.', effect: { morale:15 }
+ },
+ // Nowe eventy
+ {
+ type: 'employee_sick', title: 'Employee Sick', description: 'One of your employees is sick and cannot work today.', effect: { employeeId: null, productivity: -20, morale: -10 }
+ },
+ {
+ type: 'equipment_failure', title: 'Equipment Failure', description: 'A piece of office equipment failed, productivity drops.', effect: { productivity: -15, funds: -500 }
+ },
+ {
+ type: 'investor_visit', title: 'Investor Visit', description: 'An investor visits your company and offers a bonus!', effect: { funds:2000, reputation:10, investorBonus:2000 }
+ }
+];
+
+function maybeTriggerEvent(state: any) {
+ if (Math.random() <0.10) { //10% szansa na event co tick
+ let ev = randomEvents[Math.floor(Math.random() * randomEvents.length)];
+ // obsługa losowego pracownika dla eventu choroby
+ if (ev.type === 'employee_sick' && Array.isArray(state.employees) && state.employees.length >0) {
+ const sickEmp = state.employees[Math.floor(Math.random() * state.employees.length)];
+ ev = { ...ev, effect: { ...ev.effect, employeeId: sickEmp.id } };
+ }
+ const eventObj = {
+ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+ ...ev,
+ day: state.day
+ };
+ // Zastosuj efekt eventu
+ let updated = { ...state };
+ if (ev.effect.funds) updated.funds = (updated.funds ||0) + ev.effect.funds;
+ if (ev.effect.reputation) updated.reputation = (updated.reputation ||0) + ev.effect.reputation;
+ if (ev.effect.morale) updated.employees = (updated.employees || []).map((e: any) => ({ ...e, morale: (e.morale ||0) + ev.effect.morale }));
+ if (ev.effect.productivity) {
+ if (ev.type === 'employee_sick' && ev.effect.employeeId) {
+ updated.employees = (updated.employees || []).map((e: any) => e.id === ev.effect.employeeId ? { ...e, productivity: Math.max(0, (e.productivity ||0) + ev.effect.productivity), morale: (e.morale ||0) + ev.effect.morale } : e);
+ } else {
+ updated.employees = (updated.employees || []).map((e: any) => ({ ...e, productivity: Math.max(0, (e.productivity ||0) + ev.effect.productivity) }));
+ }
+ }
+ updated.gameEvents = [eventObj, ...(updated.gameEvents || [])];
+ updated.events = [`${new Date().toLocaleTimeString()} — EVENT: ${ev.title} (${ev.description})`, ...(updated.events || [])];
+ return updated;
+ }
+ return state;
+}
+
+  useEffect(() => {
+    if (showMainMenu && tickManagerRef.current) {
+      tickManagerRef.current.stop();
+      setTickSpeed(0);
+    }
+  }, [showMainMenu]);
+
+  const handleNewGame = () => {
+    const fresh = refreshContracts(createEmptyCompany(), true);
+    setCompany(fresh);
+    setShowMainMenu(false);
+    setCanContinue(false);
+    pushToast({ type: 'info', message: 'New game started' });
+  };
+
+  const handleContinueGame = async () => {
+    const success = await handleLoadGame('autosave', { silent: true });
+    if (success) {
+      setShowMainMenu(false);
+      pushToast({ type: 'success', message: 'Autosave loaded' });
+    } else {
+      pushToast({ type: 'warning', message: 'No autosave found' });
+    }
+  };
+
+  const handleLoadFromMenu = async () => {
+    const success = await handleLoadGame();
+    if (success) setShowMainMenu(false);
+  };
+
+  const handleExitGame = () => {
+    if (typeof window !== 'undefined') {
+      if (window.electronAPI?.invoke) {
+        window.electronAPI.invoke('app-exit');
+      } else {
+        window.close();
+      }
+    }
+  };
+
+  const openOptionsOverlay = () => setShowOptionsOverlay(true);
+  const closeOptionsOverlay = () => setShowOptionsOverlay(false);
+
+  const CONTRACT_REFRESH_INTERVAL_DAYS = 4;
+
+  function refreshContracts(state: any, force = false) {
+    const day = state.day ?? 1;
+    const nextRefreshDay = state.nextContractRefreshDay ?? day;
+    if (!force && day < nextRefreshDay) return state;
+    const reputation = state.reputation ?? 100;
+    const offerCount = Math.min(6, 4 + Math.floor(reputation / 90));
+    const existing = (state.contracts || []).filter((c: any) => c.status && c.status !== 'available' && c.status !== 'locked');
+    const generated = generateContractsBatch({ reputation, day, count: offerCount });
+    return {
+      ...state,
+      contracts: [...existing, ...generated],
+      lastContractRefreshDay: day,
+      nextContractRefreshDay: day + CONTRACT_REFRESH_INTERVAL_DAYS,
+    };
+  }
+
+  const handleAcceptContract = (contractId: string) => {
+    setCompany((current: any) => {
+      const contracts = current.contracts || [];
+      const contract = contracts.find((c: any) => c.id === contractId);
+      if (!contract) {
+        pushToast({ type: 'error', message: 'Contract not found' });
+        return current;
+      }
+      if (contract.status === 'locked') {
+        pushToast({ type: 'warning', message: 'Reputation too low for this contract' });
+        return current;
+      }
+      if (contract.status !== 'available') {
+        pushToast({ type: 'info', message: 'Contract already handled' });
+        return current;
+      }
+
+      const projectId = `contract_${contract.id}`;
+      if ((current.projects || []).some((p: any) => p.id === projectId)) {
+        pushToast({ type: 'warning', message: 'Project already exists for contract' });
+        return current;
+      }
+
+      const effort = contract.expectedEffort ?? Math.max(80, Math.round(contract.reward / 40));
+      const newProject: Project = {
+        id: projectId,
+        name: contract.name,
+        description: contract.description,
+        effort,
+        progress: 0,
+        reward: contract.reward,
+        requiredRoles: contract.requiredRoles,
+        assignees: [],
+        createdAt: new Date().toISOString(),
+        status: 'active',
+      };
+
+      pushProjectEvent(`Contract accepted: ${contract.name}`);
+
+      return {
+        ...current,
+        projects: [...(current.projects || []), newProject],
+        contracts: contracts.map((c: any) =>
+          c.id === contractId
+            ? { ...c, status: 'accepted', assignedProjectId: projectId }
+            : c
+        ),
+      };
+    });
+  };
+
+  const handleRentOffice = (officeId: string) => {
+    setCompany((c: any) => ({
+      ...c,
+      offices: (c.offices || []).map((o: Office) =>
+        o.id === officeId ? { ...o, owned: true } : o
+      ),
+      selectedOfficeId: officeId,
+    }));
+    pushToast({ type: 'success', message: 'Office rented' });
+  };
+
+  const handleAssignDesk = (officeId: string, deskId: string, employeeId: string) => {
+    setCompany((c: any) => ({
+      ...c,
+      offices: (c.offices || []).map((o: Office) =>
+        o.id !== officeId
+          ? o
+          : {
+              ...o,
+              desks: o.desks.map(d =>
+                d.id === deskId ? { ...d, assignedEmployeeId: employeeId || undefined } : d
+              ),
+            }
+      ),
+    }));
+    pushToast({ type: 'info', message: employeeId ? 'Employee assigned to desk' : 'Desk cleared' });
+  };
+
+  const handleUpgradeDesk = (officeId: string, deskId: string, upgradeId: string) => {
+    setCompany((c: any) => ({
+      ...c,
+      offices: (c.offices || []).map((o: Office) =>
+        o.id !== officeId
+          ? o
+          : {
+              ...o,
+              desks: o.desks.map(d =>
+                d.id === deskId
+                  ? {
+                      ...d,
+                      upgrades: [
+                        ...(d.upgrades || []),
+                        { id: upgradeId, name: 'Ergonomic Pack', cost: 0, effect: { productivity: 10, morale: 5 } },
+                      ],
+                    }
+                  : d
+              ),
+            }
+      ),
+    }));
+    pushToast({ type: 'success', message: 'Desk upgraded' });
+  };
+
+
+
+  return (
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: '100vh', background: darkMode ? '#181818' : '#f5f5f5', color: darkMode ? '#fff' : '#222', transition: 'background0.3s, color0.3s' }}>
+      <div style={{ position:'absolute', left:24, top:24, zIndex:10001, display:'flex', flexDirection:'column', gap:8 }}>
+         <div style={{ fontWeight:700, fontSize:18 }}>Day: {company.gameDay ?? gameDay} | Hour: {(company.gameHour ?? gameHour).toString().padStart(2,'0')}:00</div>
+         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+ <button
+ style={{
+ padding:'6px16px', fontWeight:600, background: tickSpeed ===0 ? '#ffa4a4' : undefined,
+ border:'1px solid #888', borderRadius:4, transition:'box-shadow0.2s, background0.2s',
+ boxShadow: '02px8px rgba(0,0,0,0.08)',
+ }}
+ onMouseEnter={e => e.currentTarget.style.background = '#e0e0e0'}
+ onMouseLeave={e => e.currentTarget.style.background = tickSpeed ===0 ? '#ffa4a4' : ''}
+ onClick={handlePause}
+ >Pause</button>
+ <button style={{padding:'6px16px', fontWeight:600, background: tickSpeed ===1000 ? '#e0e0e0' : undefined}} onClick={handleNormal}>x1</button>
+ <button style={{padding:'6px16px', fontWeight:600, background: tickSpeed ===333 ? '#e0e0e0' : undefined}} onClick={handleMedium}>x3</button>
+ <button style={{padding:'6px16px', fontWeight:600, background: tickSpeed ===200 ? '#e0e0e0' : undefined}} onClick={handleFast}>x5</button>
+ <button
+ style={{
+ padding:'6px16px', fontWeight:600,
+ background: tickSpeed ===0 ? '#4caf50' : (tickSpeed >0 ? '#4caf50' : '#eee'),
+ color: '#fff',
+ border:'1px solid #388e3c', borderRadius:4, transition:'box-shadow0.2s, background0.2s',
+ boxShadow: '02px8px rgba(76,175,80,0.15)'
+ }}
+ onMouseEnter={e => e.currentTarget.style.background = '#388e3c'}
+ onMouseLeave={e => e.currentTarget.style.background = '#4caf50'}
+ onClick={handleStart}
+ >Start</button>
+ <button style={{padding:'6px16px', fontWeight:600, border:'1px solid #888', borderRadius:4}} onClick={handleSaveGame}>Save</button>
+ <button style={{padding:'6px16px', fontWeight:600, border:'1px solid #888', borderRadius:4}} onClick={handleLoadGame}>Load</button>
+</div>
+       </div>
+      <h1 style={{ margin: '24px012px0', textAlign: 'center' }}>Business Simulation Game</h1>
+      <div style={{ flex:1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap:24, paddingBottom:60 }}>
+        <div style={{ width:900, maxWidth: '100%' }}>
+          {renderActiveTab()}
+        </div>
+      </div>
+      {/* MENU NA DOLE */}
+      <div style={{ position:'fixed', left:0, right:0, bottom:0, background: darkMode ? '#222' : '#fff', color: darkMode ? '#fff' : '#222', display:'flex', justifyContent:'center', gap:24, padding:'10px0', zIndex:10000, borderTop: darkMode ? '1px solid #333' : '1px solid #ddd', boxShadow:'0 -2px8px rgba(0,0,0,0.04)' }}>
+ {menuTabs.map(tab => (
+ <button
+ key={tab.key}
+ onClick={() => setActiveTab(tab.key)}
+ title={tab.label}
+ style={{
+ background: activeTab === tab.key ? (darkMode ? '#444' : '#eee') : 'transparent',
+ color: activeTab === tab.key ? (darkMode ? '#fff' : '#222') : (darkMode ? '#bbb' : '#888'),
+ border: 'none',
+ borderRadius:4,
+ padding: '6px18px',
+ fontWeight: activeTab === tab.key ?700 :400,
+ fontSize:16,
+ cursor: 'pointer',
+ boxShadow: activeTab === tab.key ? '02px8px rgba(0,0,0,0.08)' : 'none',
+ transition: 'all0.2s',
+ display: 'flex', alignItems: 'center', gap:8,
+ position: 'relative',
+ }}
+ >
+ {tab.icon}
+ <span>{tab.label}</span>
+ </button>
+ ))}
+ <button
+ onClick={() => setDarkMode(d => !d)}
+ title={darkMode ? 'Light mode' : 'Dark mode'}
+ style={{
+ background: 'transparent', color: darkMode ? '#ffd700' : '#222', border: 'none', borderRadius:4, padding: '6px18px', fontSize:18, cursor: 'pointer', marginLeft:24
+ }}
+ >
+ {darkMode ? <FaSun /> : <FaMoon />}
+ </button>
+ </div>
+ <Toasts list={toasts} onRemove={(id)=> setToasts(s=> s.filter(x=> x.id!==id))} darkMode={darkMode} />
+ {confirmProps && (
+ <ConfirmationModal
+ {...confirmProps}
+ onClose={() => setConfirmProps(null)}
+ />
+ )}
+ {bankruptOpen && (
+ <BankruptcyModal
+ company={company}
+ onClose={() => setBankruptOpen(false)}
+ onLoan={handleLoan}
+ onInvestor={handleInvestor}
+ onRollback={handleRollback}
+ />
+ )}
+ {showMainMenu && (
+   <>
+      <MainMenu
+        canContinue={canContinue}
+        onNewGame={handleNewGame}
+        onContinue={handleContinueGame}
+        onLoadGame={handleLoadFromMenu}
+        onToggleOptions={openOptionsOverlay}
+        onExit={handleExitGame}
+        darkMode={darkMode}
+      />
+      {showOptionsOverlay && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.45)',
+            zIndex: 21000,
+          }}
+        >
+          <div
+            style={{
+              width: 320,
+              padding: 24,
+              background: darkMode ? '#1f1f1f' : '#fff',
+              color: darkMode ? '#fff' : '#222',
+              borderRadius: 12,
+              boxShadow: '0 8px 30px rgba(0,0,0,0.25)'
+            }}
+          >
+            <h2>Options</h2>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0' }}>
+              <input type="checkbox" checked={darkMode} onChange={() => setDarkMode(d => !d)} />
+              Dark mode
+            </label>
+            <button style={{ padding: '8px 16px', borderRadius: 6 }} onClick={closeOptionsOverlay}>Close</button>
+          </div>
+        </div>
+      )}w
+    </>
+  )}
+ </div>
+  );
+};
+
+export default App;

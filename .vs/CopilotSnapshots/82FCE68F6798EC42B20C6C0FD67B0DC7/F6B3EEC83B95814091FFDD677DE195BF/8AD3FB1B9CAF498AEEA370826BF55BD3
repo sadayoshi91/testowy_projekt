@@ -1,0 +1,33 @@
+﻿export type Mod = {
+  id: string;
+  name: string;
+  description?: string;
+  dataFiles?: string[];
+};
+
+let cachedStaticMods: Mod[] | null = null;
+
+async function loadStaticMods(): Promise<Mod[]> {
+  if (cachedStaticMods) {
+    return cachedStaticMods;
+  }
+  try {
+    const module = await import('../../mods/index.json');
+    const data = (module as { default?: Mod[] }).default ?? (module as unknown as Mod[]);
+    cachedStaticMods = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.warn('Static mod list unavailable', error);
+    cachedStaticMods = [];
+  }
+  return cachedStaticMods;
+}
+
+export async function listMods(): Promise<Mod[]> {
+  if ((window as any).electronAPI?.listMods) {
+    console.log('Korzystam z Electron API');
+    const res = await (window as any).electronAPI.listMods();
+    return res.success ? res.mods : [];
+  }
+  console.log('Korzystam z danych statycznych');
+  return loadStaticMods();
+}

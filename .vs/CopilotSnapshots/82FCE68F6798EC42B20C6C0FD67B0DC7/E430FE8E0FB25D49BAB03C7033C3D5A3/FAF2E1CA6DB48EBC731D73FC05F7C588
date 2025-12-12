@@ -1,0 +1,110 @@
+﻿// src/app/components/ProjectList_enhanced.tsx
+import React from 'react';
+import { Employee } from '../../models/employee';
+
+interface ProjectRowEnhancedProps {
+  project: any;
+  employees: Employee[];
+  onAssignSpecific?: (pid: string, empId: string) => void;
+  onUnassign?: (pid: string) => void;
+  onDropEmployee?: (pid: string, empId: string) => void;
+}
+
+export const ProjectRowEnhanced: React.FC<ProjectRowEnhancedProps> = ({
+  project,
+  employees,
+  onAssignSpecific,
+  onUnassign,
+  onDropEmployee,
+}) => {
+  if (!project) return null;
+
+  const [selectedEmployee, setSelectedEmployee] = React.useState('');
+  const name = project.name ?? 'Unnamed project';
+  const desc = project.description ?? '';
+  const reward = project.reward ?? 0;
+  const eff = typeof project.effort === 'number' ? Math.max(1, project.effort) : 1;
+  const prog = typeof project.progress === 'number' ? project.progress : 0;
+  const pct = Math.min(100, Math.max(0, Number(((prog / eff) * 100).toFixed(1))));
+  const roles = Array.isArray(project.requiredRoles) && project.requiredRoles.length ? project.requiredRoles.join(', ') : 'general';
+  const assignees: string[] = Array.isArray(project.assignees) ? project.assignees : [];
+  const assignedDetails = assignees.map((id) => {
+    const found = employees.find((emp) => emp.id === id);
+    return { id, label: found ? `${found.name} (${found.role})` : id };
+  });
+
+  const handleAssignClick = () => {
+    if (selectedEmployee && onAssignSpecific) {
+      onAssignSpecific(project.id, selectedEmployee);
+      setSelectedEmployee('');
+    }
+  };
+
+  const handleUnassignClick = () => {
+    if (onUnassign) {
+      onUnassign(project.id);
+    }
+  };
+
+  return (
+    <article
+      className="project-card"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const empId = e.dataTransfer?.getData('text/employee-id') || e.dataTransfer?.getData('text/plain');
+        if (empId && onDropEmployee) {
+          onDropEmployee(project.id, empId);
+        }
+      }}
+    >
+      <div className="project-card__header">
+        <div>
+          <strong>{name}</strong>
+          {desc && <p className="muted" style={{ margin: '4px 0 0' }}>{desc}</p>}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="pill">Reward {reward}</div>
+          <div className="state-label">{project.status ?? 'active'}</div>
+        </div>
+      </div>
+      <div className="project-card__progress">
+        <div className="project-card__progress-track" aria-hidden>
+          <span style={{ width: `${pct}%` }} />
+        </div>
+        <strong>{pct}%</strong>
+      </div>
+      <div className="project-card__meta">
+        <span className="pill">{roles}</span>
+        <span className="tag">Effort {eff}</span>
+        {project.reward && <span className="tag">Reward {project.reward}</span>}
+      </div>
+      <div className="project-card__assignees">
+        {assignedDetails.length === 0 ? (
+          <span className="muted">No assignees yet</span>
+        ) : (
+          assignedDetails.map((assignee) => (
+            <span key={assignee.id} className="pill">{assignee.label}</span>
+          ))
+        )}
+      </div>
+      <div className="project-card__actions">
+        <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)}>
+          <option value="">Assign employee…</option>
+          {employees.map((emp) => (
+            <option key={emp.id} value={emp.id} disabled={assignees.includes(emp.id)}>
+              {emp.name} ({emp.role})
+            </option>
+          ))}
+        </select>
+        <button className="btn-outline" onClick={handleAssignClick} disabled={!selectedEmployee}>
+          Assign
+        </button>
+        <button className="btn-outline" onClick={handleUnassignClick} disabled={assignees.length === 0}>
+          Unassign last
+        </button>
+      </div>
+      <small className="state-label">Drag employees onto this card to assign faster</small>
+    </article>
+  );
+};

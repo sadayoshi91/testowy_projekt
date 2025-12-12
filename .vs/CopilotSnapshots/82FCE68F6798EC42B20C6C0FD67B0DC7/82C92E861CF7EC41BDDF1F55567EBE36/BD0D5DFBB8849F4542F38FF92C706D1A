@@ -1,0 +1,51 @@
+﻿import React from 'react';
+
+interface MainMenuProps {
+  canContinue: boolean;
+  onNewGame: () => void;
+  onContinue: () => void;
+  onLoadGame: () => void;
+  onToggleOptions?: () => void;
+  onExit?: () => void;
+  onClose?: () => void;
+}
+
+export const MainMenu: React.FC<MainMenuProps> = ({
+  canContinue,
+  onNewGame,
+  onContinue,
+  onLoadGame,
+  onToggleOptions,
+  onExit,
+  onClose,
+}) => {
+  return (
+    <div className="menu-overlay">
+      <div className="menu-card">
+        <p className="menu-eyebrow">Tycoon mode</p>
+        <h1>Startup Company</h1>
+        <p>Build teams, win contracts and stay solvent in this neon boardroom fantasy.</p>
+        <div className="menu-actions">
+          <button className="primary" onClick={onNewGame}>
+            Start new game
+          </button>
+          <button onClick={onContinue} disabled={!canContinue}>
+            Continue
+          </button>
+          <button onClick={onLoadGame}>Load save</button>
+          {onToggleOptions && <button onClick={onToggleOptions}>Options</button>}
+          {onExit && (
+            <button className="btn-outline" onClick={onExit}>
+              Exit to desktop
+            </button>
+          )}
+          {onClose && (
+            <button className="btn-outline" onClick={onClose}>
+              Back to game
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

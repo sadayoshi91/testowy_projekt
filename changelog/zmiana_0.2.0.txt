@@ -1,0 +1,5 @@
+Zmiana0.2.0
+
+- Zaawansowane szkolenia: efekty szkoleñ (produktywnoœæ, morale, nowe role), historia szkoleñ pracownika
+- Automatyczne koñczenie szkoleñ po up³ywie czasu
+- Przygotowanie pod kolejne systemy gameplay (kontrakty, R&D, biura, konkurencja)

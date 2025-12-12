@@ -22,8 +22,10 @@ export class TickManager {
      * Dziêki temu TickManager nie trzyma w³asnego snapshotu i nie nadpisuje zmian w UI.
      */
     start(onUpdate: (updater: (prev: CompanyState) => CompanyState) => void) {
-        if (this.intervalId) return;
-
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
         this.intervalId = window.setInterval(() => {
             try {
                 // u¿ywamy funkcyjnego updatora Reacta — zapewnia on najœwie¿szy prev state
@@ -46,6 +48,16 @@ export class TickManager {
         if (!this.intervalId) return;
         clearInterval(this.intervalId);
         this.intervalId = null;
+    }
+
+    setTickRate(ms: number, onUpdate?: (updater: (prev: CompanyState) => CompanyState) => void) {
+        this.tickRateMs = ms;
+        if (this.intervalId) {
+            this.stop();
+            if (ms > 0 && onUpdate) {
+                this.start(onUpdate);
+            }
+        }
     }
 
     // runNTicks: synchroniczny fast-forward na przekazanym snapshot'cie

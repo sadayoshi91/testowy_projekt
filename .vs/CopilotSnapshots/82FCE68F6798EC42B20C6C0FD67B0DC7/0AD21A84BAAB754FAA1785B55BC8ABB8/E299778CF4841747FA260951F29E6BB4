@@ -1,0 +1,70 @@
+﻿import { Contract } from './contract';
+import { Training } from './training';
+import { Research } from './research';
+import { Office } from './office';
+import { Competitor } from './competitor';
+import { GameEvent } from './event';
+import { Mission } from './mission';
+
+export type OfficeItem = {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  ownerId?: string | null;
+};
+
+export type Employee = {
+  id: string;
+  name: string;
+  role: string;
+  salary: number;
+  productivity: number;
+};
+
+export type Project = {
+  id: string;
+  type: string;
+  progress: number;
+  reward: number;
+};
+
+export type CompanyState = {
+  name: string;
+  funds: number;
+  day: number;
+  projects: Project[];
+  employees: Employee[];
+  office: {
+    width: number;
+    height: number;
+    items: OfficeItem[];
+  };
+  contracts?: Contract[]; // NEW: lista kontraktów
+  trainings?: Training[]; // NEW: lista szkoleń
+  reputation?: number; // NEW: reputacja firmy
+  researches?: Research[]; // lista badań
+  unlockedTechnologies?: string[]; // odblokowane technologie/typy projektów/bonusy
+  offices?: Office[];
+  selectedOfficeId?: string;
+  competitors?: Competitor[];
+  events?: string[];
+  gameEvents?: GameEvent[];
+  missions?: Mission[];
+};
+
+export const createEmptyCompany = (): CompanyState => ({
+  name: 'My Startup',
+  funds: 10000,
+  day: 1,
+  projects: [],
+  employees: [],
+  office: { width: 10, height: 6, items: [] },
+  contracts: [],
+  trainings: [],
+  researches: [],
+  unlockedTechnologies: [],
+  events: [],
+  reputation: 100,
+  payrollHistory: [],
+});

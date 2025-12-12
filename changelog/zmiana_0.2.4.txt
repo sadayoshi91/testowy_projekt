@@ -1,0 +1,6 @@
+Zmiana0.2.4
+
+- Dodano panel konkurencji (Competitors): lista AI firm, ranking
+- Prosta AI: konkurenci automatycznie przyjmuj¹ i koñcz¹ kontrakty co7 dni gry
+- Efekty: wzrost completedContracts, reputacji, funduszy AI
+- Nowa zak³adka Competitors w menu

@@ -1,0 +1,15 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\changelog",
+    "\\src",
+    "\\src\\app",
+    "\\src\\app\\components",
+    "\\src\\app\\hooks",
+    "\\src\\models",
+    "\\src\\services",
+    "\\src\\simulation",
+    "\\src\\systems"
+  ],
+  "PreviewInSolutionExplorer": false
+}

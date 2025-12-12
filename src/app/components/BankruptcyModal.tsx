@@ -1,28 +1,35 @@
 import React from 'react';
+import { useI18n } from '../i18n';
 
 export function BankruptcyModal({ open, funds, onLoan, onInvestor, onRollback }: { open:boolean, funds:number, onLoan: (amt:number)=>void, onInvestor: ()=>void, onRollback: ()=>void }) {
+  const { t } = useI18n();
   if (!open) return null;
   return (
-    <div style={{ position:'fixed', left:0, top:0, right:0, bottom:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:3000 }}>
-      <div style={{ width:520, background:'#fff', borderRadius:8, padding:18 }}>
-        <h2 style={{ marginTop:0, color:'#b00020' }}>Bankruptcy alert</h2>
-        <p>Funds are critically low: <strong>{funds.toFixed(2)}</strong></p>
-        <p>You can choose one of recovery actions:</p>
-        <div style={{ display:'flex', gap:10, marginTop:12 }}>
-          <div style={{ flex:1, border:'1px solid #eee', padding:10, borderRadius:6 }}>
-            <h4>Take a short loan</h4>
-            <p>Get immediate funds (+2000) but pay higher interest later.</p>
-            <button onClick={() => onLoan(2000)}>Take loan 2000</button>
+    <div className="modal-backdrop">
+      <div className="modal-card">
+        <div className="modal-header">
+          <div>
+            <p className="menu-eyebrow" style={{ marginBottom: 4 }}>{t('bankruptcy.eyebrow')}</p>
+            <h2 style={{ margin: 0 }}>{t('bankruptcy.title')}</h2>
           </div>
-          <div style={{ flex:1, border:'1px solid #eee', padding:10, borderRadius:6 }}>
-            <h4>Seek investor</h4>
-            <p>Receive 5000 equity investment (one-time).</p>
-            <button onClick={onInvestor}>Get investor 5000</button>
+          <span className="pill">{t('bankruptcy.badge', { funds: funds.toFixed(2) })}</span>
+        </div>
+        <p>{t('bankruptcy.body')}</p>
+        <div className="option-grid">
+          <div className="option-card">
+            <h4>{t('bankruptcy.loan.title')}</h4>
+            <p>{t('bankruptcy.loan.body')}</p>
+            <button onClick={() => onLoan(2000)}>{t('bankruptcy.loan.action')}</button>
           </div>
-          <div style={{ flex:1, border:'1px solid #eee', padding:10, borderRadius:6 }}>
-            <h4>Rollback payroll</h4>
-            <p>Revert last payroll payout from history (if available).</p>
-            <button onClick={onRollback}>Rollback</button>
+          <div className="option-card">
+            <h4>{t('bankruptcy.investor.title')}</h4>
+            <p>{t('bankruptcy.investor.body')}</p>
+            <button onClick={onInvestor}>{t('bankruptcy.investor.action')}</button>
+          </div>
+          <div className="option-card">
+            <h4>{t('bankruptcy.rollback.title')}</h4>
+            <p>{t('bankruptcy.rollback.body')}</p>
+            <button onClick={onRollback}>{t('bankruptcy.rollback.action')}</button>
           </div>
         </div>
       </div>

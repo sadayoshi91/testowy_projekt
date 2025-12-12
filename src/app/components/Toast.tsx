@@ -1,12 +1,30 @@
 import React, { useEffect } from 'react';
+import {
+  HiOutlineCheckCircle,
+  HiOutlineExclamationTriangle,
+  HiOutlineExclamationCircle,
+  HiOutlineInformationCircle,
+  HiOutlineXMark
+} from 'react-icons/hi2';
+import { useI18n } from '../i18n';
 
 export type ToastItem = { id: string, type: 'info'|'success'|'warning'|'error', title?: string, message: string, ttl?: number };
 
-export function Toasts({ list, onRemove }: { list: ToastItem[], onRemove: (id:string)=>void }) {
+type IconComponent = React.ComponentType<{ className?: string }>;
+
+const ICON_MAP: Record<ToastItem['type'], IconComponent> = {
+  success: HiOutlineCheckCircle,
+  error: HiOutlineExclamationCircle,
+  warning: HiOutlineExclamationTriangle,
+  info: HiOutlineInformationCircle,
+};
+
+export function Toasts({ list = [], onRemove }: { list?: ToastItem[], onRemove: (id:string)=>void }) {
+  const { t } = useI18n();
   useEffect(() => {
     const timers: any[] = [];
-    list.forEach(item => {
-      const ttl = item.ttl ?? 4000;
+    (list || []).forEach(item => {
+      const ttl = item.ttl ?? 2200;
       const t = setTimeout(() => onRemove(item.id), ttl);
       timers.push(t);
     });
@@ -14,18 +32,35 @@ export function Toasts({ list, onRemove }: { list: ToastItem[], onRemove: (id:st
   }, [list, onRemove]);
 
   if (!list || list.length === 0) return null;
+
   return (
-    <div style={{ position:'fixed', right:20, top:20, zIndex:9999, display:'flex', flexDirection:'column', gap:8 }}>
-      {list.map(t => (
-        <div key={t.id} style={{
-          minWidth:240, padding:10, borderRadius:8, boxShadow:'0 6px 18px rgba(0,0,0,0.12)',
-          background: t.type === 'success' ? '#e6ffed' : t.type === 'error' ? '#ffe6e6' : t.type === 'warning' ? '#fff4e5' : '#f0f7ff',
-          border: '1px solid rgba(0,0,0,0.06)'
-        }}>
-          <div style={{ fontWeight:700, marginBottom:4 }}>{t.title ?? (t.type[0].toUpperCase()+t.type.slice(1))}</div>
-          <div style={{ fontSize:13 }}>{t.message}</div>
-        </div>
-      ))}
+    <div className="toast-stack" role="status" aria-live="polite">
+      {list.map((toast) => {
+        const Icon = ICON_MAP[toast.type];
+        return (
+          <article key={toast.id} className={`toast-card ${toast.type}`}>
+            <div className="toast-card__content">
+              <div className="toast-card__icon" aria-hidden="true">
+                <Icon />
+              </div>
+              <div className="toast-card__body">
+                <p className="toast-card__title">{toast.title ?? toast.type.toUpperCase()}</p>
+                <small>{toast.message}</small>
+              </div>
+              <button
+                type="button"
+                aria-label={t('toast.dismiss')}
+                onClick={() => onRemove(toast.id)}
+                className="toast-card__close"
+              >
+                <span className="toast-card__close-icon" aria-hidden="true">
+                  <HiOutlineXMark />
+                </span>
+              </button>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }

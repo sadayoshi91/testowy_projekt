@@ -1,54 +1,182 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useCurrency } from '../context/CurrencyContext';
+import { useI18n } from '../i18n';
 
-export function FinancePanel({ company, nextPayoutDays, runPayrollNow, exportPayroll, updateSalary, openConfirmation }: any) {
+type FinancePanelProps = {
+  company: any;
+  nextPayoutDays?: number;
+  runPayrollNow: () => void;
+  exportPayroll: () => void;
+  updateSalary: (employeeId: string, value: number) => void;
+  openConfirmation: (options: any) => void;
+  darkMode?: boolean;
+  onChangeInterval?: (days: number) => void;
+};
+
+export function FinancePanel({
+  company,
+  nextPayoutDays,
+  runPayrollNow,
+  exportPayroll,
+  updateSalary,
+  openConfirmation,
+  onChangeInterval,
+}: FinancePanelProps) {
+  const { formatMoney } = useCurrency();
+  const { t } = useI18n();
   const employees = Array.isArray(company?.employees) ? company.employees : [];
-  const totalPayroll = employees.reduce((acc:number, e:any) => acc + (Number(e?.salary || 0)), 0);
-  const [interval, setInterval] = useState(company?.payrollIntervalDays || 30);
+  const payrollHistory = Array.isArray(company?.payrollHistory) ? company.payrollHistory.slice(0, 4) : [];
+  const [intervalValue, setIntervalValue] = useState<number>(company.payrollIntervalDays || 30);
+  const [editedSalaries, setEditedSalaries] = useState<Record<string, number>>({});
 
-  const onRun = () => {
+  useEffect(() => {
+    setIntervalValue(company.payrollIntervalDays || 30);
+  }, [company.payrollIntervalDays]);
+
+  useEffect(() => {
+    setEditedSalaries(() => {
+      const next: Record<string, number> = {};
+      employees.forEach((emp: any) => {
+        next[emp.id] = emp.salary || 0;
+      });
+      return next;
+    });
+  }, [employees]);
+
+  const totalPayroll = useMemo(
+    () => employees.reduce((acc: number, emp: any) => acc + (Number(emp?.salary) || 0), 0),
+    [employees]
+  );
+
+  const runwayCycles = totalPayroll > 0 ? (company.funds || 0) / totalPayroll : null;
+  const intervalDisabled = typeof onChangeInterval !== 'function';
+  const countdown = typeof nextPayoutDays === 'number' ? nextPayoutDays : '—';
+
+  const confirmRunPayroll = () => {
     openConfirmation({
-      title: 'Run payroll now?',
-      body: `This will deduct ${totalPayroll.toFixed(2)} plus taxes and rent from funds.`,
-      onConfirm: () => { runPayrollNow(); },
-      onCancel: () => {}
+      title: t('finance.confirmPayroll.title'),
+      body: t('finance.confirmPayroll.body', { amount: formatMoney(totalPayroll) }),
+      onConfirm: runPayrollNow,
     });
   };
 
+  const confirmIntervalChange = () => {
+    if (intervalDisabled) return;
+    openConfirmation({
+      title: t('finance.confirmInterval.title'),
+      body: t('finance.confirmInterval.body', { days: intervalValue }),
+      onConfirm: () => onChangeInterval?.(intervalValue),
+    });
+  };
+
+  const handleSalaryChange = (id: string, value: number) => {
+    setEditedSalaries((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const handleSalarySave = (id: string) => {
+    const value = Number(editedSalaries[id] ?? 0);
+    updateSalary(id, value);
+  };
+
+  const insightCards = [
+    { label: t('finance.funds'), value: formatMoney(company.funds || 0), detail: t('finance.runwayHint'), tone: company.funds < 0 ? 'trend-negative' : 'trend-positive' },
+    { label: t('finance.payrollGross'), value: formatMoney(totalPayroll), detail: t('finance.runwayHint'), tone: 'trend-neutral' },
+    { label: t('finance.nextPayroll'), value: `${countdown} ${t('finance.nextInDays')}`, detail: t('finance.nextPayroll'), tone: 'trend-neutral' },
+    { label: t('finance.runway'), value: runwayCycles ? `${runwayCycles.toFixed(1)} cyklu` : 'n/d', detail: t('finance.runwayHint'), tone: runwayCycles && runwayCycles < 1 ? 'trend-negative' : 'trend-positive' },
+  ];
+
   return (
-    <div style={{ border: '1px solid #eee', padding: 10, borderRadius: 6, background: '#fff' }}>
-      <h3>Finance</h3>
-      <div>Funds: {(company?.funds ?? 0).toFixed(2)}</div>
-      <div style={{ marginTop:8 }}><strong>Payroll (sum salaries):</strong> {totalPayroll.toFixed(2)}</div>
-      <div style={{ marginTop:4 }}><strong>Next payout in:</strong> {nextPayoutDays} days</div>
-
-      <div style={{ marginTop:8 }}>
-        <button onClick={onRun}>Run payroll now</button>
-        <button style={{ marginLeft:8 }} onClick={() => exportPayroll()}>Export payroll history</button>
+    <div className="panel-stack">
+      <div className="insight-grid">
+        {insightCards.map((card) => (
+          <div className="insight-card" key={card.label}>
+            <p className="insight-label">{card.label}</p>
+            <h3>{card.value}</h3>
+            <p className={`insight-subtext ${card.tone}`}>{card.detail}</p>
+          </div>
+        ))}
       </div>
 
-      <div style={{ marginTop:10 }}>
-        <label>Payroll interval (days): </label>
-        <input type="number" value={interval} onChange={(e)=> setInterval(Number(e.target.value || 30))} style={{ width:80 }} />
-        <button style={{ marginLeft:8 }} onClick={()=> { if (company) company.payrollIntervalDays = interval; alert('Interval set (will apply on next reload)'); }}>Set</button>
-      </div>
-
-      <div style={{ marginTop:12 }}>
-        <strong>Employees</strong>
-        <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:6 }}>
-          {employees.map((emp:any) => (
-            <div key={emp.id} style={{ display:'flex', gap:8, alignItems:'center', border:'1px solid #eee', padding:6, borderRadius:6 }}>
-              <div style={{ flex:1 }}>{emp.name} <small style={{ color:'#666' }}>({emp.role})</small></div>
-              <div>
-                <input type="number" defaultValue={emp.salary || 0} id={`salary-${emp.id}`} style={{ width:100 }} />
-                <button style={{ marginLeft:6 }} onClick={() => {
-                  const el = document.getElementById(`salary-${emp.id}`) as HTMLInputElement|null;
-                  const val = el ? Number(el.value) : 0;
-                  updateSalary(emp.id, val);
-                }}>Set</button>
-              </div>
+      <div className="finance-grid">
+        <section className="finance-card">
+          <h4>{t('finance.cycle')}</h4>
+          <p className="insight-subtext">{t('finance.cycleHint')}</p>
+          <div className="finance-actions" style={{ marginTop: 12 }}>
+            <button className="finance-btn primary" onClick={confirmRunPayroll}>{t('finance.runPayroll')}</button>
+            <button className="finance-btn" onClick={exportPayroll}>{t('finance.export')}</button>
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <label className="insight-label" htmlFor="interval-input">{t('finance.interval')}</label>
+            <div className="input-cluster" style={{ marginTop: 8 }}>
+              <input
+                id="interval-input"
+                className="salary-input"
+                type="number"
+                min={1}
+                value={intervalValue}
+                onChange={(event) => setIntervalValue(Math.max(1, Number(event.target.value)))}
+              />
+              <button className="finance-btn" onClick={confirmIntervalChange} disabled={intervalDisabled}>Zapisz</button>
             </div>
-          ))}
-        </div>
+          </div>
+        </section>
+
+        <section className="finance-card">
+          <h4>{t('finance.salaries')}</h4>
+          {employees.length === 0 ? (
+            <div className="muted">{t('finance.noEmployees')}</div>
+          ) : (
+            <table className="finance-table">
+              <thead>
+                <tr>
+                  <th>Pracownik</th>
+                  <th>{t('finance.currentSalary')}</th>
+                  <th>{t('finance.newSalary')}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map((emp: any) => (
+                  <tr key={emp.id}>
+                    <td>
+                      <div>{emp.name}</div>
+                      <small className="muted">{emp.role}</small>
+                    </td>
+                    <td>{formatMoney(emp.salary || 0)}</td>
+                    <td>
+                      <input
+                        className="salary-input"
+                        type="number"
+                        min={0}
+                        value={editedSalaries[emp.id] ?? emp.salary ?? 0}
+                        onChange={(event) => handleSalaryChange(emp.id, Number(event.target.value))}
+                      />
+                    </td>
+                    <td>
+                      <button className="finance-btn" onClick={() => handleSalarySave(emp.id)}>{t('finance.update')}</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        <section className="finance-card">
+          <h4>{t('finance.lastPayrolls')}</h4>
+          {payrollHistory.length === 0 ? (
+            <div className="muted">{t('finance.noPayrolls')}</div>
+          ) : (
+            <div className="finance-history">
+              {payrollHistory.map((entry: any) => (
+                <div className="history-item" key={entry.id}>
+                  <span>{new Date(entry.date).toLocaleDateString('pl-PL')}</span>
+                  <strong>{formatMoney(entry.total || 0)}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

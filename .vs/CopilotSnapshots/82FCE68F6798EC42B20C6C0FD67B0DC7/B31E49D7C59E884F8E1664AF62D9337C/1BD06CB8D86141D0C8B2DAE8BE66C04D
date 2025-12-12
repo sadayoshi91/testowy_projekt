@@ -1,0 +1,90 @@
+﻿import React from 'react';
+
+interface MainMenuProps {
+  canContinue: boolean;
+  onNewGame: () => void;
+  onContinue: () => void;
+  onLoadGame: () => void;
+  onToggleOptions?: () => void;
+  onExit?: () => void;
+  darkMode?: boolean;
+}
+
+const buttonStyle = {
+  padding: '12px 18px',
+  fontSize: 16,
+  fontWeight: 600,
+  borderRadius: 8,
+  border: '1px solid #555',
+  cursor: 'pointer' as const,
+  background: '#e8e8e8',
+  color: '#222',
+  transition: 'background 0.2s, transform 0.1s',
+};
+
+export const MainMenu: React.FC<MainMenuProps> = ({
+  canContinue,
+  onNewGame,
+  onContinue,
+  onLoadGame,
+  onToggleOptions,
+  onExit,
+  darkMode,
+}) => {
+  const bg = darkMode ? '#111' : 'rgba(245,245,245,0.95)';
+  const panelBg = darkMode ? '#1f1f1f' : '#fff';
+  const textColor = darkMode ? '#fff' : '#222';
+
+  const renderButton = (
+    label: string,
+    onClick?: () => void,
+    disabled?: boolean
+  ) => (
+    <button
+      style={{
+        ...buttonStyle,
+        background: disabled ? '#aaa' : buttonStyle.background,
+        color: darkMode ? '#111' : '#222',
+      }}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: bg,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 20000,
+      }}
+    >
+      <div
+        style={{
+          width: 360,
+          padding: 32,
+          background: panelBg,
+          color: textColor,
+          borderRadius: 16,
+          boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+          textAlign: 'center',
+        }}
+      >
+        <h1 style={{ marginBottom: 24 }}>Business Simulation</h1>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {renderButton('New Game', onNewGame)}
+          {renderButton('Continue', onContinue, !canContinue)}
+          {renderButton('Load Save', onLoadGame)}
+          {renderButton('Options', onToggleOptions)}
+          {renderButton('Exit', onExit)}
+        </div>
+      </div>
+    </div>
+  );
+};

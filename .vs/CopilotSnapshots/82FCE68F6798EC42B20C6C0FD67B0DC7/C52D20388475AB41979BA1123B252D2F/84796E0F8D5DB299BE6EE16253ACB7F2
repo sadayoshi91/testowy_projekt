@@ -1,0 +1,50 @@
+﻿import React, { useEffect } from 'react';
+
+export type ToastItem = { id: string, type: 'info'|'success'|'warning'|'error', title?: string, message: string, ttl?: number };
+
+const ICON_MAP: Record<ToastItem['type'], string> = {
+  success: '?',
+  error: '?',
+  warning: '!',
+  info: 'i',
+};
+
+export function Toasts({ list = [], onRemove }: { list?: ToastItem[], onRemove: (id:string)=>void }) {
+  useEffect(() => {
+    const timers: any[] = [];
+    (list || []).forEach(item => {
+      const ttl = item.ttl ?? 2200;
+      const t = setTimeout(() => onRemove(item.id), ttl);
+      timers.push(t);
+    });
+    return () => timers.forEach(t => clearTimeout(t));
+  }, [list, onRemove]);
+
+  if (!list || list.length === 0) return null;
+
+  return (
+    <div className="toast-stack" role="status" aria-live="polite">
+      {list.map((toast) => (
+        <article key={toast.id} className={`toast-card ${toast.type}`}>
+          <div className="toast-card__content">
+            <div className="toast-card__icon" aria-hidden>
+              {ICON_MAP[toast.type]}
+            </div>
+            <div className="toast-card__body">
+              <p className="toast-card__title">{toast.title ?? toast.type.toUpperCase()}</p>
+              <small>{toast.message}</small>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss notification"
+              onClick={() => onRemove(toast.id)}
+              className="toast-card__close"
+            >
+              ×
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}

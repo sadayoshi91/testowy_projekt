@@ -1,0 +1,93 @@
+﻿// src/systems/ProjectSystem.ts
+import { Project } from '../models/project';
+import { v4 as uuidv4 } from 'uuid';
+import { CompanyState } from '../models/company';
+import { Employee } from '../models/employee';
+
+// small helper to compute contribution of an employee to a project
+function employeeContribution(emp: Employee, project: Project): number {
+  if (!emp) return 0;
+  if ((emp as any).onBreak) return 0;
+  // base contribution = employee.productivity (already a number)
+  const base = emp.productivity || 0;
+  // boost if employee.role matches project requiredRoles
+  const roleBoost = project.requiredRoles && project.requiredRoles.includes(emp.role as any) ? 1.0 : 0.6;
+  // morale & fatigue multipliers (if present)
+  const morale = (emp.morale != null) ? Math.max(0, Math.min(1, (emp.morale)/100)) : 1.0; // expect 0-100
+  const fatigueMultiplier = (emp.fatigue != null) ? Math.max(0.3, 1 - emp.fatigue/200) : 1.0;
+  return base * roleBoost * morale * fatigueMultiplier;
+}
+
+export class ProjectSystem {
+  createProject(name: string, description: string, effort: number, reward: number, requiredRoles: string[] = []): Project {
+    return {
+      id: uuidv4(),
+      name,
+      description,
+      effort: Math.max(1, Math.floor(effort)),
+      progress: 0,
+      reward: +reward,
+      requiredRoles: requiredRoles as any,
+      assignees: [],
+      createdAt: (new Date()).toISOString(),
+      completed: false,
+      deadline: null,
+      rewardPaid: false
+    };
+  }
+
+  // tickProjects: apply progress based on employees assigned
+  tickProjects(state: CompanyState): CompanyState {
+    const projects = (state.projects || []).map((p:any) => ({ ...p })) as Project[];
+    const employees = (state.employees || []) as Employee[];
+    const currentDay = state.day ?? 1;
+    const tickMultiplier = (state as any).tickMultiplier || 1;
+
+    for (const proj of projects) {
+      if (proj.completed || proj.failed) continue;
+
+      // sum contributions of assignees
+      let contrib = 0;
+      for (const id of (proj.assignees || [])) {
+        const emp = employees.find(e => e.id === id);
+        if (!emp) continue;
+        contrib += employeeContribution(emp, proj);
+      }
+
+      const progressGain = contrib * tickMultiplier;
+      proj.progress += progressGain;
+
+      if (proj.progress >= proj.effort) {
+        proj.progress = proj.effort;
+        proj.completed = true;
+        proj.status = 'completed';
+      }
+
+      if (!proj.completed && proj.deadlineDay && currentDay > proj.deadlineDay) {
+        proj.failed = true;
+        proj.status = 'paused';
+      }
+    }
+
+    let fundsDelta = 0;
+    for (const proj of projects) {
+      if (proj.completed && !proj.rewardPaid) {
+        fundsDelta += proj.reward;
+        proj.rewardPaid = true;
+      }
+      if (proj.failed && !proj.penaltyApplied) {
+        const penalty = proj.penalty ?? Math.round(proj.reward * 0.2);
+        fundsDelta -= penalty;
+        proj.penaltyApplied = true;
+      }
+    }
+
+    const newState: CompanyState = {
+      ...state,
+      projects: projects as any,
+      funds: +(((state.funds || 0) + fundsDelta)).toFixed(2)
+    };
+
+    return newState;
+  }
+}

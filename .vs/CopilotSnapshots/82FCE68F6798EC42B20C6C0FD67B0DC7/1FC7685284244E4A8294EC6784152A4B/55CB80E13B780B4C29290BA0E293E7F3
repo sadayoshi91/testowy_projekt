@@ -1,0 +1,15 @@
+﻿export type EventType = 'crisis' | 'bonus' | 'market_change' | 'random';
+
+export interface GameEvent {
+ id: string;
+ type: EventType;
+ title: string;
+ description: string;
+ effect: {
+ morale?: number;
+ productivity?: number;
+ funds?: number;
+ reputation?: number;
+ };
+ day: number;
+}

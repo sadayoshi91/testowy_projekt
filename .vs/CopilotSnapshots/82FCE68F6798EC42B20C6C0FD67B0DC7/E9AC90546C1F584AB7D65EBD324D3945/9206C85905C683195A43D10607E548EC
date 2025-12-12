@@ -1,0 +1,199 @@
+﻿import { Contract } from './contract';
+import { Training } from './training';
+import { Research } from './research';
+import { Office } from './office';
+import { Competitor } from './competitor';
+import { GameEvent } from './event';
+import { Mission } from './mission';
+import { Role } from './project';
+
+const DEFAULT_OFFICES: Office[] = [
+  {
+    id: 'office1',
+    name: 'Small Loft',
+    rent: 500,
+    desks: [
+      { id: 'desk1', name: 'Desk 1' },
+      { id: 'desk2', name: 'Desk 2' },
+    ],
+    upgrades: [],
+    owned: false,
+  },
+  {
+    id: 'office2',
+    name: 'Creative Hub',
+    rent: 1500,
+    desks: [
+      { id: 'desk3', name: 'Desk 3' },
+      { id: 'desk4', name: 'Desk 4' },
+      { id: 'desk5', name: 'Desk 5' },
+    ],
+    upgrades: [],
+    owned: false,
+  },
+];
+
+const DEFAULT_CONTRACTS: Contract[] = [
+  {
+    id: 'contract-basic-web',
+    name: 'Basic Website',
+    description: 'Modernize a small business landing page.',
+    reward: 2000,
+    penalty: 300,
+    deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    requiredRoles: ['developer'] as Role[],
+    status: 'available',
+    createdAt: new Date().toISOString(),
+    minReputation: 0,
+    durationDays: 7,
+  },
+  {
+    id: 'contract-portal',
+    name: 'Corporate Portal',
+    description: 'Intranet portal with SSO and dashboards.',
+    reward: 5000,
+    penalty: 800,
+    deadline: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+    requiredRoles: ['developer', 'designer'] as Role[],
+    status: 'available',
+    createdAt: new Date().toISOString(),
+    minReputation: 120,
+    durationDays: 10,
+  },
+  {
+    id: 'contract-mobile',
+    name: 'Mobile Companion App',
+    description: 'Hybrid app for loyalty program.',
+    reward: 8000,
+    penalty: 1400,
+    deadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    requiredRoles: ['developer', 'designer'] as Role[],
+    status: 'available',
+    createdAt: new Date().toISOString(),
+    minReputation: 150,
+    durationDays: 14,
+  },
+];
+
+const DEFAULT_COMPETITORS: Competitor[] = [
+  { id: 'comp-neo', name: 'Neon Apex', reputation: 120, completedContracts: 8, funds: 18000, aiLevel: 2 },
+  { id: 'comp-orbit', name: 'Orbit Forge', reputation: 95, completedContracts: 5, funds: 13000, aiLevel: 1 },
+  { id: 'comp-titan', name: 'Titan Labs', reputation: 160, completedContracts: 12, funds: 26000, aiLevel: 3 },
+];
+
+export const DEFAULT_RESEARCHES: Research[] = [
+  {
+    id: 'res-automation',
+    name: 'Workflow Automation',
+    description: 'Unlocks +10% productivity for developers.',
+    cost: 2500,
+    durationDays: 8,
+    status: 'available',
+    unlocks: ['Automation Suite'],
+  },
+  {
+    id: 'res-ux-lab',
+    name: 'UX Research Lab',
+    description: 'Improves designer morale and unlocks premium UI contracts.',
+    cost: 3200,
+    durationDays: 10,
+    status: 'available',
+    unlocks: ['Premium UI Projects'],
+  },
+  {
+    id: 'res-market-ai',
+    name: 'Market AI Insights',
+    description: 'Unlocks advanced marketing trainings and +5 reputation.',
+    cost: 4000,
+    durationDays: 12,
+    status: 'available',
+    unlocks: ['Marketing AI Toolkit'],
+  },
+];
+
+export type OfficeItem = {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  ownerId?: string | null;
+};
+
+export type Employee = {
+  id: string;
+  name: string;
+  role: string;
+  salary: number;
+  productivity: number;
+};
+
+export type Project = {
+  id: string;
+  type: string;
+  progress: number;
+  reward: number;
+};
+
+export type CompanyState = {
+  name: string;
+  funds: number;
+  day: number;
+  projects: Project[];
+  employees: Employee[];
+  office: {
+    width: number;
+    height: number;
+    items: OfficeItem[];
+  };
+  contracts?: Contract[];
+  trainings?: Training[];
+  reputation?: number;
+  researches?: Research[];
+  unlockedTechnologies?: string[];
+  offices?: Office[];
+  selectedOfficeId?: string;
+  competitors?: Competitor[];
+  events?: string[];
+  gameEvents?: GameEvent[];
+  missions?: Mission[];
+  payrollHistory?: any[];
+  nextContractRefreshDay?: number;
+  lastContractRefreshDay?: number;
+};
+
+const cloneOffices = () =>
+  DEFAULT_OFFICES.map(office => ({
+    ...office,
+    desks: office.desks.map(desk => ({ ...desk, upgrades: desk.upgrades ? [...desk.upgrades] : [] })),
+    upgrades: office.upgrades ? [...office.upgrades] : [],
+  }));
+
+const cloneContracts = () => DEFAULT_CONTRACTS.map(contract => ({ ...contract }));
+
+const cloneResearches = () => DEFAULT_RESEARCHES.map(research => ({ ...research }));
+const cloneCompetitors = () => DEFAULT_COMPETITORS.map(comp => ({ ...comp }));
+
+export const createEmptyCompany = (): CompanyState => ({
+  name: 'My Startup',
+  funds: 10000,
+  day: 1,
+  projects: [],
+  employees: [],
+  office: { width: 10, height: 6, items: [] },
+  contracts: cloneContracts(),
+  trainings: [],
+  researches: cloneResearches(),
+  unlockedTechnologies: [],
+  events: [],
+  reputation: 100,
+  payrollHistory: [],
+  nextContractRefreshDay: 1,
+  lastContractRefreshDay: 0,
+  offices: cloneOffices(),
+  competitors: cloneCompetitors(),
+});
+
+export const getDefaultOffices = () => cloneOffices();
+export const getDefaultContracts = () => cloneContracts();
+export const getDefaultResearches = () => cloneResearches();
+export const getDefaultCompetitors = () => cloneCompetitors();

@@ -1,94 +1,113 @@
 // src/app/components/ProjectList_enhanced.tsx
 import React from 'react';
 import { Employee } from '../../models/employee';
+import { useI18n } from '../i18n';
 
-export function ProjectRowEnhanced({
+interface ProjectRowEnhancedProps {
+  project: any;
+  employees: Employee[];
+  onAssignSpecific?: (pid: string, empId: string) => void;
+  onUnassign?: (pid: string) => void;
+  onDropEmployee?: (pid: string, empId: string) => void;
+}
+
+export const ProjectRowEnhanced: React.FC<ProjectRowEnhancedProps> = ({
   project,
   employees,
   onAssignSpecific,
   onUnassign,
-  onDropEmployee
-}: {
-  project: any,
-  employees: Employee[],
-  onAssignSpecific?: (pid:string, empId:string)=>void,
-  onUnassign?: (pid:string)=>void,
-  onDropEmployee?: (pid:string, empId:string)=>void
-}) {
-
+  onDropEmployee,
+}) => {
   if (!project) return null;
 
-  const name = project.name ?? "Unnamed project";
-  const desc = project.description ?? "";
+  const { t } = useI18n();
+
+  const [selectedEmployee, setSelectedEmployee] = React.useState('');
+  const name = project.name ?? t('projects.unnamed');
+  const desc = project.description ?? '';
   const reward = project.reward ?? 0;
-
-  const eff = typeof project.effort === "number" ? project.effort : 1;
-  const prog = typeof project.progress === "number" ? project.progress : 0;
-  const pct = Math.min(100, Math.round((prog / eff) * 10000) / 100);
-
-  const roles = Array.isArray(project.requiredRoles) ? project.requiredRoles.join(", ") : "general";
-
-  // fallback breakdown (your new Project model doesn't use design/dev/test)
-  const design = 0;
-  const development = 0;
-  const testing = 0;
-
+  const eff = typeof project.effort === 'number' ? Math.max(1, project.effort) : 1;
+  const prog = typeof project.progress === 'number' ? project.progress : 0;
+  const pct = Math.min(100, Math.max(0, Number(((prog / eff) * 100).toFixed(1))));
+  const roles = Array.isArray(project.requiredRoles) && project.requiredRoles.length ? project.requiredRoles.join(', ') : t('projects.general');
   const assignees: string[] = Array.isArray(project.assignees) ? project.assignees : [];
+  const assignedDetails = assignees.map((id) => {
+    const found = employees.find((emp) => emp.id === id);
+    return { id, label: found ? `${found.name} (${found.role})` : id };
+  });
+
+  const handleAssignClick = () => {
+    if (selectedEmployee && onAssignSpecific) {
+      onAssignSpecific(project.id, selectedEmployee);
+      setSelectedEmployee('');
+    }
+  };
+
+  const handleUnassignClick = () => {
+    if (onUnassign) {
+      onUnassign(project.id);
+    }
+  };
 
   return (
-    <div
-      style={{ border:'1px solid #ddd', padding:8, marginBottom:8, borderRadius:6, background:'#fff' }}
-      onDragOver={(e)=>e.preventDefault()}
-      onDrop={(e)=>{
+    <article
+      className="project-card"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
         e.preventDefault();
         const empId = e.dataTransfer?.getData('text/employee-id') || e.dataTransfer?.getData('text/plain');
-        if (empId && onDropEmployee) onDropEmployee(project.id, empId);
+        if (empId && onDropEmployee) {
+          onDropEmployee(project.id, empId);
+        }
       }}
     >
-      <div style={{ display:'flex', justifyContent:'space-between' }}>
+      <div className="project-card__header">
         <div>
-          <strong>{name}</strong> <small>({roles})</small>
-          <div style={{ fontSize:12, color:'#666' }}>{desc}</div>
+          <strong>{name}</strong>
+          {desc && <p className="muted" style={{ margin: '4px 0 0' }}>{desc}</p>}
         </div>
-        <div style={{ textAlign:'right' }}>
-          <div><strong>{reward}</strong> reward</div>
-          <div style={{ fontSize:12 }}>Progress: {pct}%</div>
-        </div>
-      </div>
-
-      <div style={{ height:10, background:'#eee', marginTop:6, borderRadius:4 }}>
-        <div style={{ width: `${pct}%`, height:'100%', background:'#4caf50' }} />
-      </div>
-
-      <div style={{ marginTop:6 }}>
-        <div><strong>Assigned:</strong> {assignees.length} {assignees.map(a=>`[${a}]`).join(" ")}</div>
-
-        <div style={{ marginTop:6 }}>
-          <select id={`sel-${project.id}`}>
-            <option value="">-- choose employee --</option>
-            {employees.map(emp=>(
-              <option key={emp.id} value={emp.id}>{emp.name} ({emp.role})</option>
-            ))}
-          </select>
-
-          <button
-            style={{ marginLeft:6 }}
-            onClick={()=>{
-              const sel = document.getElementById(`sel-${project.id}`) as HTMLSelectElement;
-              if (sel?.value && onAssignSpecific)
-                onAssignSpecific(project.id, sel.value);
-            }}
-          >Assign</button>
-
-          <button style={{ marginLeft:6 }} onClick={()=>onUnassign && onUnassign(project.id)}>
-            Unassign last
-          </button>
+        <div style={{ textAlign: 'right' }}>
+          <div className="pill">{t('projects.reward', { amount: reward })}</div>
+          <div className="state-label">{t('projects.status', { value: project.status ?? 'active' })}</div>
         </div>
       </div>
-
-      <div style={{ fontSize:11, marginTop:6, color:'#777' }}>
-        Work breakdown: {design}/{development}/{testing}
+      <div className="project-card__progress">
+        <div className="project-card__progress-track" aria-hidden>
+          <span style={{ width: `${pct}%` }} />
+        </div>
+        <strong>{pct}%</strong>
       </div>
-    </div>
+      <div className="project-card__meta">
+        <span className="pill">{roles}</span>
+        <span className="tag">{t('projects.effort', { value: eff })}</span>
+        {project.reward && <span className="tag">{t('projects.rewardTag', { value: project.reward })}</span>}
+      </div>
+      <div className="project-card__assignees">
+        {assignedDetails.length === 0 ? (
+          <span className="muted">{t('projects.noAssignees')}</span>
+        ) : (
+          assignedDetails.map((assignee) => (
+            <span key={assignee.id} className="pill">{assignee.label}</span>
+          ))
+        )}
+      </div>
+      <div className="project-card__actions">
+        <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)}>
+          <option value="">{t('projects.assignPlaceholder')}</option>
+          {employees.map((emp) => (
+            <option key={emp.id} value={emp.id} disabled={assignees.includes(emp.id)}>
+              {emp.name} ({emp.role})
+            </option>
+          ))}
+        </select>
+        <button className="btn-outline" onClick={handleAssignClick} disabled={!selectedEmployee}>
+          {t('projects.assign')}
+        </button>
+        <button className="btn-outline" onClick={handleUnassignClick} disabled={assignees.length === 0}>
+          {t('projects.unassignLast')}
+        </button>
+      </div>
+      <small className="state-label">{t('projects.dragHint')}</small>
+    </article>
   );
-}
+};

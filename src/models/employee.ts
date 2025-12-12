@@ -21,4 +21,10 @@ export type Employee = {
   salary: number; // currency per pay period (configurable)
   onBreak?: boolean; // is the employee currently on break
   workPace?: 'slow' | 'normal' | 'fast'; // affects fatigue and productivity
+  onTraining?: boolean; // NEW: czy pracownik jest na szkoleniu
+  trainingHistory?: string[]; // NEW: historia szkoleñ (id szkoleñ)
+  unlockedRoles?: Role[]; // NEW: dodatkowe role
+  experience?: number; // NEW: doœwiadczenie do awansów
+  trait?: string; // charakterystyczna cecha (np. Mentor)
+  traitDescription?: string; // opis efektu cechy
 };

@@ -1,0 +1,833 @@
+﻿import React, { useEffect, useState, useRef } from 'react';
+import { createEmptyCompany } from '../models/company';
+import { TickManager } from '../simulation/TickManager';
+import { HRSystem } from '../systems/HRSystem';
+import { ProjectSystem } from '../systems/ProjectSystem';
+import { EconomySystem } from '../systems/EconomySystem';
+import { ProjectRowEnhanced } from './components/ProjectList_enhanced';
+import { ProjectDetails } from './components/ProjectDetails';
+import { EmployeesList } from './components/EmployeesList';
+import { AssignModal } from './components/AssignModal';
+import { EventLog } from './components/EventLog';
+import { FinancePanel } from './components/FinancePanel';
+import { Toasts, ToastItem } from './components/Toast';
+import { ConfirmationModal } from './components/ConfirmationModal';
+import { BankruptcyModal } from './components/BankruptcyModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { OfficeGrid } from './components/OfficeGrid';
+import { listMods } from '../services/ModLoader';
+import { useEconomy } from './hooks/useEconomy';
+import { usePayrollHelpers } from './hooks/usePayroll';
+import { Project, Role } from '../models/project';
+import { ContractsPanel } from './components/ContractsPanel';
+import { Contract, ContractStatus } from '../models/contract';
+import { TrainingsPanel } from './components/TrainingsPanel';
+import { Training } from '../models/training';
+import { ResearchPanel } from './components/ResearchPanel';
+import { Research } from '../models/research';
+import { FaFileContract, FaTasks, FaUsers, FaChalkboardTeacher, FaMoneyBill, FaListAlt, FaMoon, FaSun } from 'react-icons/fa';
+
+const DEFAULT_ROLES: Role[] = ['developer', 'designer'];
+const DEFAULT_STATUS = 'active';
+
+type ProjectStatus = 'active' | 'completed' | 'paused';
+
+const App: React.FC = () => {
+  const [company, setCompany] = useState<any>(createEmptyCompany());
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [confirmProps, setConfirmProps] = useState<any>(null);
+  const [bankruptOpen, setBankruptOpen] = useState(false);
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [newProject, setNewProject] = useState({
+    name: '',
+    description: '',
+    effort:100,
+    reward:1000,
+    requiredRoles: DEFAULT_ROLES,
+  });
+  const [editProjectId, setEditProjectId] = useState<string|null>(null);
+  const [editProject, setEditProject] = useState<any>(null);
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [sortKey, setSortKey] = useState<string>('createdAt');
+  const [activeTab, setActiveTab] = useState<string>('contracts');
+  const [darkMode, setDarkMode] = useState(false);
+
+  const tickManagerRef = useRef<any>(null);
+  const hrRef = useRef<any>(null);
+  const projectRef = useRef<any>(null);
+  const econRef = useRef<any>(null);
+  const economy = useEconomy(company, setCompany); 
+  const getCompany = () => company;
+  const { runPayroll: backupPayroll, exportPayroll: exportPayrollIPC } = usePayrollHelpers(setCompany, getCompany, (t: any) => {
+        
+        pushToast(t);
+    });
+  
+
+  const menuTabs = [
+    { key: 'contracts', label: 'Contracts', icon: <FaFileContract /> },
+    { key: 'projects', label: 'Projects', icon: <FaTasks /> },
+    { key: 'employees', label: 'Employees', icon: <FaUsers /> },
+    { key: 'trainings', label: 'Trainings', icon: <FaChalkboardTeacher /> },
+    { key: 'rnd', label: 'R&D', icon: <FaListAlt /> },
+    { key: 'finance', label: 'Finance', icon: <FaMoneyBill /> },
+    { key: 'log', label: 'Log', icon: <FaListAlt /> },
+  ];
+
+  if (!hrRef.current) hrRef.current = new HRSystem();
+  if (!projectRef.current) projectRef.current = new ProjectSystem();
+  if (!econRef.current) econRef.current = new EconomySystem(company?.payrollIntervalDays || 30);
+
+  const pushToast = (t: Omit<ToastItem, 'id'>) => {
+    const id = (Date.now()).toString(36) + Math.random().toString(36).slice(2,6);
+    setToasts(s => [{ id, ...t }, ...s].slice(0, 6));
+  };
+
+  const openConfirmation = (props:any) => {
+    setConfirmProps(props);
+  };
+
+  useEffect(() => {
+    (async () => {
+      const m = await listMods();
+    })();
+  }, []);
+
+  const pushEvent = (msg: string) => {
+    const stamp = new Date().toLocaleTimeString();
+    setCompany((c:any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
+  };
+
+  const pushProjectEvent = (msg: string) => {
+    const stamp = new Date().toLocaleTimeString();
+    setCompany((c: any) => ({ ...c, events: [`${stamp} — ${msg}`, ...(c.events||[])] }));
+  };
+
+  const tickCallback = (state: any): any => {
+    const hr = hrRef.current!;
+    const ps = projectRef.current!;
+    const econ = econRef.current!;
+    let updated = hr.tickCompany(state);
+    updated = ps.tickProjects(updated);
+    updated = econ.tickEconomy(updated);
+
+    const empIncome = (updated.employees || []).reduce((acc:number, e:any) => {
+      if ((e as any).onBreak) return acc;
+      return acc + (e.productivity || 0);
+    }, 0);
+    updated.funds = +( (updated.funds || 0) + empIncome ).toFixed(2);
+    updated.day = (updated.day || 0) + 1;
+
+    if ((updated.funds || 0) < -1000) {
+      try { tickManagerRef.current?.stop(); } catch(e){}
+      setBankruptOpen(true);
+      pushToast({ type:'warning', title:'Bankruptcy', message:'Funds critically low, paused' });
+    }
+
+    return updated;
+  };
+
+  useEffect(() => {
+    tickManagerRef.current = new TickManager(tickCallback, 1000);
+    return () => tickManagerRef.current?.stop();
+  }, []);
+
+  const hire = (name='Dev', role:'developer'|'designer'|'marketer'|'researcher'='developer', level='junior', skill=50, salary=160) => {
+    const hr = hrRef.current!;
+    const emp = hr.hireEmployee(name, role as any, level as any, skill);
+    (emp as any).salary = salary;
+    setCompany((c:any) => ({ ...c, employees: [...(c.employees||[]), emp] }));
+    pushToast({ type:'success', title:'Hire', message:`${emp.name} hired` });
+  };
+
+  const assignToProject = (projectId:string, employeeId?:string) => {
+    const p = (company.projects||[]).find((x:any)=>x.id===projectId);
+    if (!p) return;
+    if (employeeId) {
+      const emp = company.employees.find((e:any)=> e.id === employeeId);
+      if (!emp) { pushToast({ type:'error', message:'Employee not found' }); return; }
+      if ((p.assignees||[]).includes(employeeId)) { pushToast({ type:'warning', message:'Already assigned' }); return; }
+      setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), employeeId]}: pr) }));
+      pushToast({ type:'info', message: `${emp.name} assigned` });
+      return;
+    }
+    const free = (company.employees||[]).find((e:any)=> !(p.assignees||[]).includes(e.id));
+    if (!free) { pushToast({ type:'warning', message:'No free employee' }); return; }
+    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: [...(pr.assignees||[]), free.id]}: pr) }));
+    pushToast({ type:'info', message: `${free.name} auto-assigned` });
+  };
+
+  const unassignSpecific = (projectId:string, employeeId:string) => {
+    setCompany((c:any)=> ({ ...c, projects: (c.projects||[]).map((pr:any)=> pr.id===projectId? {...pr, assignees: (pr.assignees||[]).filter((x:any)=> x!==employeeId)}: pr) }));
+  };
+
+  const fastForward = (n:number) => {
+    if (!tickManagerRef.current) return;
+    const snapshot = ('structuredClone' in window) ? (window as any).structuredClone(company) : JSON.parse(JSON.stringify(company));
+    const res = tickManagerRef.current.runNTicks(snapshot, n);
+    setCompany(res);
+  };
+
+    const runPayrollNow = () => {
+        // use economy hook to run payroll (this will update company via setCompany)
+        const res = economy.runPayrollNow();
+        // start autosave/backup/export tasks
+        try { backupPayroll(); } catch (e) { /* ignore */ }
+        // open bankruptcy modal if needed
+        if ((res?.funds || 0) < -1000) setBankruptOpen(true);
+    };
+
+
+    const exportPayroll = () => {
+        // delegate to payroll helper which handles IPC and toasts
+        exportPayrollIPC();
+    };
+
+
+  const updateSalary = (empId:string, salary:number) => {
+    setCompany((c:any)=> ({ ...c, employees: (c.employees||[]).map((e:any)=> e.id===empId? {...e, salary}: e) }));
+    pushToast({ type:'info', message:'Salary updated' });
+  };
+
+  const handleLoan = (amt:number) => {
+    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + amt }));
+    setBankruptOpen(false);
+    pushToast({ type:'success', message: `Loan: +${amt}` });
+  };
+
+  const handleInvestor = () => {
+    setCompany((c:any)=> ({ ...c, funds: (c.funds||0) + 5000 }));
+    setBankruptOpen(false);
+    pushToast({ type:'success', message: 'Investor +5000' });
+  };
+
+  const handleRollback = () => {
+    setCompany((c:any)=> {
+      const h = c.payrollHistory || [];
+      if (h.length === 0) { pushToast({ type:'warning', message:'No payroll to rollback' }); return c; }
+      const last = h[0];
+      const funds = (c.funds||0) + (last.total || 0);
+      return { ...c, funds, payrollHistory: h.slice(1) };
+    });
+    setBankruptOpen(false);
+    pushToast({ type:'success', message:'Last payroll rolled back' });
+  };
+
+  // Funkcja do obsługi dodawania projektu
+  const handleAddProject = () => {
+    if (!newProject.name.trim()) {
+      pushToast({ type: 'error', message: 'Project name required' });
+      return;
+    }
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    setCompany((c: any) => ({
+      ...c,
+      projects: [
+        ...(c.projects || []),
+        {
+          id,
+          name: newProject.name,
+          description: newProject.description,
+          effort: Number(newProject.effort),
+          progress:0,
+          reward: Number(newProject.reward),
+          requiredRoles: newProject.requiredRoles,
+          assignees: [],
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }));
+    setShowAddProject(false);
+    setNewProject({ name: '', description: '', effort:100, reward:1000, requiredRoles: DEFAULT_ROLES });
+    pushToast({ type: 'success', message: 'Project created' });
+    pushProjectEvent(`Project created: ${newProject.name}`);
+  };
+
+  // Funkcja do obsługi edycji projektu
+  const handleEditProject = (project: Project) => {
+    setEditProjectId(project.id);
+    setEditProject({ ...project });
+    setShowAddProject(false);
+   };
+
+   const handleEditProjectSave = () => {
+    if (!editProject.name.trim()) {
+      pushToast({ type: 'error', message: 'Project name required' });
+      return;
+    }
+    setCompany((c: any) => ({
+      ...c,
+      projects: (c.projects || []).map((p: Project) =>
+        p.id === editProjectId ? { ...editProject } : p
+      ),
+    }));
+    setEditProjectId(null);
+    setEditProject(null);
+    pushToast({ type: 'success', message: 'Project updated' });
+    pushProjectEvent(`Project updated: ${editProject.name}`);
+   };
+
+   const handleEditProjectCancel = () => {
+    setEditProjectId(null);
+    setEditProject(null);
+   };
+
+  // Funkcja do obsługi usuwania projektu
+  const handleDeleteProject = (projectId: string) => {
+    if (!window.confirm('Are you sure you want to delete this project?')) return;
+    setCompany((c: any) => ({
+      ...c,
+      projects: (c.projects || []).filter((p: Project) => p.id !== projectId),
+    }));
+    pushToast({ type: 'success', message: 'Project deleted' });
+    pushProjectEvent(`Project deleted: ${projectId}`);
+  };
+
+  const handleStatusChange = (projectId: string, status: string) => {
+    setCompany((c: any) => ({
+      ...c,
+      projects: (c.projects || []).map((p: any) =>
+        p.id === projectId ? { ...p, status } : p
+      ),
+    }));
+    pushToast({ type: 'info', message: `Status changed to ${status}` });
+    const p = (company.projects||[]).find((x:any)=>x.id===projectId);
+    if (p) {
+      pushProjectEvent(`Project status changed: ${p.name} → ${status}`);
+    }
+  };
+
+  // sort & filter projects
+  const filteredSortedProjects = (company.projects || [])
+    .filter((p: any) => filterStatus === 'all' || p.status === filterStatus)
+    .sort((a: any, b: any) => {
+      if (sortKey === 'name') return a.name.localeCompare(b.name);
+      if (sortKey === 'status') return (a.status || '').localeCompare(b.status || '');
+      if (sortKey === 'createdAt') return (a.createdAt || '').localeCompare(b.createdAt || '');
+      return 0;
+    });
+
+  // Dodaj przykładowe kontrakty do stanu początkowego, jeśli nie istnieją
+  React.useEffect(() => {
+    if (!company.contracts || company.contracts.length ===0) {
+      setCompany((c: any) => ({
+        ...c,
+        contracts: [
+          {
+            id: 'contract1',
+            name: 'Website for Local Business',
+            description: 'Build a simple website for a local business.',
+            reward:2000,
+            deadline: new Date(Date.now() +7*24*60*60*1000).toISOString(),
+            requiredRoles: ['developer', 'designer'],
+            status: 'available',
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: 'contract2',
+            name: 'Mobile App MVP',
+            description: 'Develop a mobile app MVP for a startup.',
+            reward:5000,
+            deadline: new Date(Date.now() +14*24*60*60*1000).toISOString(),
+            requiredRoles: ['developer', 'designer', 'marketer'],
+            status: 'available',
+            createdAt: new Date().toISOString(),
+          }
+        ]
+      }));
+    }
+  // eslint-disable-next-line
+  }, []);
+
+  // Obsługa przyjmowania kontraktu
+  const handleAcceptContract = (contractId: string) => {
+    setCompany((c: any) => {
+      const contract = (c.contracts || []).find((ct: Contract) => ct.id === contractId);
+      if (!contract || contract.status !== 'available') return c;
+      // Tworzenie projektu na podstawie kontraktu
+      const projectId = 'proj-' + contractId;
+      const newProject = {
+        id: projectId,
+        name: contract.name,
+        description: contract.description,
+        effort:100,
+        progress:0,
+        reward: contract.reward,
+        requiredRoles: contract.requiredRoles,
+        assignees: [],
+        createdAt: new Date().toISOString(),
+        status: 'active',
+      };
+      return {
+        ...c,
+        contracts: (c.contracts || []).map((ct: Contract) =>
+          ct.id === contractId ? { ...ct, status: 'accepted', assignedProjectId: projectId } : ct
+        ),
+        projects: [...(c.projects || []), newProject],
+      };
+    });
+    pushToast({ type: 'success', message: 'Contract accepted and project created' });
+    pushProjectEvent(`Contract accepted: ${contractId}`);
+  };
+
+  // Dodaj przykładowe szkolenia do stanu początkowego, jeśli nie istnieją
+  React.useEffect(() => {
+    if (!company.trainings || company.trainings.length ===0) {
+      setCompany((c: any) => ({
+        ...c,
+        trainings: [
+          {
+            id: 'training1',
+            name: 'React Bootcamp',
+            description: 'Intensive React training for developers.',
+            role: 'developer',
+            skillGain:20,
+            durationDays:5,
+            cost:500,
+            status: 'available',
+          },
+          {
+            id: 'training2',
+            name: 'UX Design Workshop',
+            description: 'Workshop for designers to improve UX skills.',
+            role: 'designer',
+            skillGain:15,
+            durationDays:3,
+            cost:300,
+            status: 'available',
+          }
+        ]
+      }));
+    }
+  // eslint-disable-next-line
+  }, []);
+
+  // Przy rozpoczęciu szkolenia zapisz dzień gry
+  const handleStartTraining = (trainingId: string, employeeId: string) => {
+    setCompany((c: any) => {
+      const training = (c.trainings || []).find((tr: Training) => tr.id === trainingId);
+      if (!training || training.status !== 'available') return c;
+      return {
+        ...c,
+        trainings: (c.trainings || []).map((tr: Training) =>
+          tr.id === trainingId ? { ...tr, status: 'in_progress', assignedEmployeeId: employeeId, startedAt: new Date().toISOString(), startedDay: c.day } : tr
+        ),
+        employees: (c.employees || []).map((e: any) =>
+          e.id === employeeId ? { ...e, onTraining: true } : e
+        ),
+      };
+    });
+    pushToast({ type: 'info', message: 'Training started' });
+    pushProjectEvent(`Training started: ${trainingId} for employee ${employeeId}`);
+  };
+
+  // Funkcja do kończenia szkoleń (poprawiona: efekty nakładane zawsze, gdy szkolenie jest completed, a nie ma go w historii)
+  const finishTrainings = () => {
+    setCompany((c: any) => {
+      let changed = false;
+      //1. Najpierw zaktualizuj statusy szkoleń
+      const updatedTrainings = (c.trainings || []).map((tr: any) => {
+        if (tr.status === 'in_progress' && tr.startedDay !== undefined && !tr.completedAt) {
+          if ((c.day - tr.startedDay) >= tr.durationDays) {
+            changed = true;
+            return { ...tr, status: 'completed', completedAt: new Date().toISOString() };
+          }
+        }
+        return tr;
+      });
+      //2. Następnie ZAWSZE sprawdzaj, czy są completed szkolenia bez efektu u pracownika
+      let updatedEmployees = (c.employees || []).map((e: any) => {
+        // znajdź szkolenie zakończone, którego nie ma w historii pracownika
+        const tr = updatedTrainings.find((t: any) => t.assignedEmployeeId === e.id && t.status === 'completed' && (!e.trainingHistory || !e.trainingHistory.includes(t.id)));
+        if (tr) {
+          let newProd = (e.productivity ||0) + (tr.skillGain ||0);
+          let newMorale = (e.morale ||0) + (tr.moraleGain ||0);
+          let unlockedRoles = e.unlockedRoles ? [...e.unlockedRoles] : [];
+          if (tr.newRole && !unlockedRoles.includes(tr.newRole)) unlockedRoles.push(tr.newRole);
+          changed = true;
+          return {
+            ...e,
+            productivity: newProd,
+            morale: newMorale,
+            onTraining: false,
+            trainingHistory: [...(e.trainingHistory || []), tr.id],
+            unlockedRoles
+          };
+        }
+        // jeśli był w trakcie szkolenia, ale nie ukończył, zostaje bez zmian
+        if (updatedTrainings.find((t: any) => t.assignedEmployeeId === e.id && t.status === 'in_progress')) {
+          return { ...e, onTraining: true };
+        }
+        return { ...e, onTraining: false };
+      });
+      if (!changed) return c;
+      pushProjectEvent('Training completed for some employees');
+      return { ...c, trainings: updatedTrainings, employees: updatedEmployees };
+    });
+  };
+
+  useEffect(() => {
+    const interval = setInterval(finishTrainings,2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Losowe generowanie kontraktów co7 dni gry, limit5 kontraktów
+useEffect(() => {
+  if (!company.day) return;
+  if (company.day %7 ===0 && (company.contracts || []).filter((ct: any) => ct.status === 'available').length <5) {
+    setCompany((c: any) => {
+      // generuj nowy kontrakt
+      const id = 'contract-' + Math.random().toString(36).slice(2,8);
+      const newContract = {
+        id,
+        name: 'Generated Contract ' + id,
+        description: 'Complete a randomly generated project.',
+        reward: Math.floor(2000 + Math.random() *4000),
+        deadline: new Date(Date.now() + (5 + Math.floor(Math.random()*10))*24*60*60*1000).toISOString(),
+        requiredRoles: ['developer', 'designer'],
+        status: 'available',
+        createdAt: new Date().toISOString(),
+      };
+      return {
+        ...c,
+        contracts: [...(c.contracts || []), newContract]
+      };
+    });
+    pushProjectEvent('New contract generated!');
+  }
+}, [company.day]);
+
+// Deadline: automatyczne wygasanie kontraktów po terminie
+useEffect(() => {
+  setCompany((c: any) => {
+    const now = new Date();
+    let changed = false;
+    const updatedContracts = (c.contracts || []).map((ct: any) => {
+      if (ct.status === 'accepted' || ct.status === 'available') {
+        const deadline = new Date(ct.deadline);
+        if (now > deadline && !ct.expired && !ct.completed) {
+          changed = true;
+          return { ...ct, status: 'expired', expired: true };
+        }
+      }
+      return ct;
+    });
+    if (!changed) return c;
+    pushProjectEvent('Some contracts expired!');
+    return { ...c, contracts: updatedContracts };
+  });
+}, [company.day]);
+
+// Kary za niewykonanie kontraktu
+useEffect(() => {
+  setCompany((c: any) => {
+    let changed = false;
+    let reputation = c.reputation ??100;
+    let funds = c.funds ??0;
+    const updatedContracts = (c.contracts || []).map((ct: any) => {
+      if (ct.status === 'expired' && !ct.failed) {
+        changed = true;
+        reputation -=10;
+        funds -=500;
+        return { ...ct, failed: true };
+      }
+      return ct;
+    });
+    if (!changed) return c;
+    pushProjectEvent('Penalty for failed contracts!');
+    return { ...c, contracts: updatedContracts, reputation, funds };
+  });
+}, [company.contracts]);
+
+// Ukończenie kontraktu: projekt powiązany z kontraktem ukończony
+useEffect(() => {
+  setCompany((c: any) => {
+    let changed = false;
+    let reputation = c.reputation ??100;
+    let funds = c.funds ??0;
+    const updatedContracts = (c.contracts || []).map((ct: any) => {
+      if (ct.status === 'accepted' && ct.assignedProjectId) {
+        const pr = (c.projects || []).find((p: any) => p.id === ct.assignedProjectId && p.status === 'completed');
+        if (pr && !ct.completed) {
+          changed = true;
+          reputation +=15;
+          funds += ct.reward;
+          return { ...ct, status: 'completed', completed: true };
+        }
+      }
+      return ct;
+    });
+    if (!changed) return c;
+    pushProjectEvent('Contract completed!');
+    return { ...c, contracts: updatedContracts, reputation, funds };
+  });
+}, [company.projects]);
+
+// Prosty ranking firmy na podstawie ukończonych kontraktów i reputacji
+const companyRanking = ((company.contracts || []).filter((ct: any) => ct.completed).length *10) + (company.reputation ??100);
+
+  return (
+    <div style={{ background: darkMode ? '#181818' : '#f5f5f5', color: darkMode ? '#fff' : '#222', minHeight: '100vh', transition: 'background0.3s, color0.3s' }}>
+      <div style={{ flex:1, display: 'flex', gap:12 }}>
+        <div style={{ width:720 }}>
+          <div>
+            <h2>{company.name}</h2>
+            <p>Day: {company.day} | Funds: {(company.funds||0).toFixed(2)}</p>
+          </div>
+          <div style={{ display: 'flex', gap:8 }}>
+            <button onClick={()=>hire('Alice','developer')}>Hire Dev</button>
+            <button onClick={()=>hire('Bob','designer')}>Hire Designer</button>
+            <button onClick={()=>fastForward(30)}>+30 ticks</button>
+            <button onClick={()=>{ tickManagerRef.current?.start((s:any)=> setCompany(s)); }}>Start</button>
+            <button onClick={()=>{ tickManagerRef.current?.stop(); }}>Pause</button>
+          </div>
+          <hr />
+          <OfficeGrid company={company} />
+        </div>
+        <div style={{ width:360, display:'flex', flexDirection:'column', gap:12 }}>
+          {activeTab === 'contracts' && (
+            <ContractsPanel contracts={company.contracts || []} onAccept={handleAcceptContract} darkMode={darkMode} />
+          )}
+          {activeTab === 'projects' && (
+            <div>
+              <h3>Projects</h3>
+              <button onClick={() => setShowAddProject(s => !s)} style={{ marginBottom:8 }}>
+                {showAddProject ? 'Cancel' : 'Add Project'}
+              </button>
+              {showAddProject && (
+                <div style={{ border: '1px solid #ccc', padding:8, borderRadius:4, marginBottom:8 }}>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Project name"
+                      value={newProject.name}
+                      onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))}
+                      style={{ width: '100%', marginBottom:4 }}
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Description"
+                      value={newProject.description}
+                      onChange={e => setNewProject(p => ({ ...p, description: e.target.value }))}
+                      style={{ width: '100%', marginBottom:4 }}
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      placeholder="Effort"
+                      value={newProject.effort}
+                      min={1}
+                      onChange={e => setNewProject(p => ({ ...p, effort: Number(e.target.value) }))}
+                      style={{ width: '48%', marginRight:4 }}
+                    />
+                    <input
+                      type="number"
+                      placeholder="Reward"
+                      value={newProject.reward}
+                      min={0}
+                      onChange={e => setNewProject(p => ({ ...p, reward: Number(e.target.value) }))}
+                      style={{ width: '48%' }}
+                    />
+                  </div>
+                  <div style={{ margin: '4px0' }}>
+                    <label>Roles: </label>
+                    <select
+                      multiple
+                      value={newProject.requiredRoles}
+                      onChange={e => {
+                        const opts = Array.from(e.target.selectedOptions).map(o => o.value as Role);
+                        setNewProject(p => ({ ...p, requiredRoles: opts }));
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="developer">developer</option>
+                      <option value="designer">designer</option>
+                      <option value="marketer">marketer</option>
+                      <option value="researcher">researcher</option>
+                    </select>
+                  </div>
+                  <button onClick={handleAddProject} style={{ marginTop:4 }}>Create</button>
+                </div>
+              )}
+              {editProjectId && editProject && (
+                <div style={{ border: '1px solid #0af', padding:8, borderRadius:4, marginBottom:8, background:'#f8fcff' }}>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Project name"
+                      value={editProject.name}
+                      onChange={e => setEditProject((p: any) => ({ ...p, name: e.target.value }))}
+                      style={{ width: '100%', marginBottom:4 }}
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Description"
+                      value={editProject.description}
+                      onChange={e => setEditProject((p: any) => ({ ...p, description: e.target.value }))}
+                      style={{ width: '100%', marginBottom:4 }}
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      placeholder="Effort"
+                      value={editProject.effort}
+                      min={1}
+                      onChange={e => setEditProject((p: any) => ({ ...p, effort: Number(e.target.value) }))}
+                      style={{ width: '48%', marginRight:4 }}
+                    />
+                    <input
+                      type="number"
+                      placeholder="Reward"
+                      value={editProject.reward}
+                      min={0}
+                      onChange={e => setEditProject((p: any) => ({ ...p, reward: Number(e.target.value) }))}
+                      style={{ width: '48%' }}
+                    />
+                  </div>
+                  <div style={{ margin: '4px0' }}>
+                    <label>Roles: </label>
+                    <select
+                      multiple
+                      value={editProject.requiredRoles}
+                      onChange={e => {
+                        const opts = Array.from(e.target.selectedOptions).map(o => o.value as Role);
+                        setEditProject((p: any) => ({ ...p, requiredRoles: opts }));
+                      }}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="developer">developer</option>
+                      <option value="designer">designer</option>
+                      <option value="marketer">marketer</option>
+                      <option value="researcher">researcher</option>
+                    </select>
+                  </div>
+                  <div style={{ display:'flex', gap:8, marginTop:4 }}>
+                    <button onClick={handleEditProjectSave}>Save</button>
+                    <button onClick={handleEditProjectCancel}>Cancel</button>
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap:8, marginBottom:8 }}>
+                <label>Status:</label>
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                  <option value="paused">Paused</option>
+                </select>
+                <label>Sort by:</label>
+                <select value={sortKey} onChange={e => setSortKey(e.target.value)}>
+                  <option value="createdAt">Created</option>
+                  <option value="name">Name</option>
+                  <option value="status">Status</option>
+                </select>
+              </div>
+              <ErrorBoundary>
+                {filteredSortedProjects.map((p: any) => (
+                  <div key={p.id} style={{ position:'relative', borderBottom:'1px solid #eee', paddingBottom:4, marginBottom:4 }}>
+                    <ProjectRowEnhanced
+                      project={p}
+                      employees={company.employees}
+                      onAssignSpecific={(pid, eid) => assignToProject(pid, eid)}
+                      onUnassign={(pid) => unassignSpecific(pid)}
+                      onDropEmployee={(pid, eid) => assignToProject(pid, eid)}
+                    />
+                    <div style={{ position:'absolute', top:4, right:80, display:'flex', gap:4 }}>
+                      <select value={p.status || 'active'} onChange={e => handleStatusChange(p.id, e.target.value)} style={{ fontSize:12 }}>
+                        <option value="active">Active</option>
+                        <option value="completed">Completed</option>
+                        <option value="paused">Paused</option>
+                      </select>
+                    </div>
+                    <div style={{ position:'absolute', top:4, right:4, display:'flex', gap:4 }}>
+                      <button onClick={() => handleEditProject(p)} style={{ fontSize:12 }}>Edit</button>
+                      <button onClick={() => handleDeleteProject(p.id)} style={{ fontSize:12, color:'#a00' }}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+              </ErrorBoundary>
+            </div>
+          )}
+          {activeTab === 'employees' && (
+            <div>
+              <h3>Employees (drag from here)</h3>
+              <EmployeesList employees={company.employees || []} />
+            </div>
+          )}
+          {activeTab === 'trainings' && (
+            <TrainingsPanel trainings={company.trainings || []} employees={company.employees || []} onStart={handleStartTraining} darkMode={darkMode} />
+          )}
+          {activeTab === 'rnd' && (
+            <ResearchPanel researches={company.researches || []} onStart={handleStartResearch} onInvest={handleInvestResearch} darkMode={darkMode} />
+          )}
+          {activeTab === 'finance' && (
+            <FinancePanel company={company} nextPayoutDays={econRef.current?.nextPayoutInDays(company)} runPayrollNow={runPayrollNow} exportPayroll={exportPayroll} updateSalary={updateSalary} openConfirmation={openConfirmation} darkMode={darkMode} />
+          )}
+          {activeTab === 'log' && (
+            <EventLog events={(company.events || [])} darkMode={darkMode} />
+          )}
+          {/* Selected Project zawsze dostępny */}
+          <div>
+            <h3>Selected Project</h3>
+            <ErrorBoundary>
+              <ProjectDetails project={(company.projects||[]).find((x:any)=> x.id === (company.selectedProjectId || null))} employees={company.employees || []} onAssignSpecific={(pid,eid)=> assignToProject(pid,eid)} onUnassignSpecific={(pid,eid)=> unassignSpecific(pid,eid)} darkMode={darkMode} />
+            </ErrorBoundary>
+          </div>
+        </div>
+      </div>
+      <div style={{ marginBottom:12, fontWeight:700, fontSize:16, color: darkMode ? '#ffd700' : '#222' }}>
+        Company Ranking: {companyRanking}
+        <span style={{ marginLeft:12, fontWeight:400, fontSize:14, color: darkMode ? '#aaa' : '#555' }}>
+          Reputation: {company.reputation ??100}
+        </span>
+      </div>
+      {/* MENU NA DOLE */}
+      <div style={{ position:'fixed', left:0, right:0, bottom:0, background: darkMode ? '#222' : '#fff', color: darkMode ? '#fff' : '#222', display:'flex', justifyContent:'center', gap:24, padding:'10px0', zIndex:10000, borderTop: darkMode ? '1px solid #333' : '1px solid #ddd', boxShadow:'0 -2px8px rgba(0,0,0,0.04)' }}>
+        {menuTabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            title={tab.label}
+            style={{
+              background: activeTab === tab.key ? (darkMode ? '#444' : '#eee') : 'transparent',
+              color: activeTab === tab.key ? (darkMode ? '#fff' : '#222') : (darkMode ? '#bbb' : '#888'),
+              border: 'none',
+              borderRadius:4,
+              padding: '6px18px',
+              fontWeight: activeTab === tab.key ?700 :400,
+              fontSize:16,
+              cursor: 'pointer',
+              boxShadow: activeTab === tab.key ? '02px8px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all0.2s',
+              display: 'flex', alignItems: 'center', gap:8,
+              position: 'relative',
+             }}
+          >
+            {tab.icon}
+            <span>{tab.label}</span>
+          </button>
+        ))}
+        <button
+          onClick={() => setDarkMode(d => !d)}
+          title={darkMode ? 'Light mode' : 'Dark mode'}
+          style={{
+            background: 'transparent', color: darkMode ? '#ffd700' : '#222', border: 'none', borderRadius:4, padding: '6px18px', fontSize:18, cursor: 'pointer', marginLeft:24
+          }}
+        >
+          {darkMode ? <FaSun /> : <FaMoon />}
+        </button>
+      </div>
+      <Toasts list={toasts} onRemove={(id)=> setToasts(s=> s.filter(x=> x.id!==id))} darkMode={darkMode} />
+      <ConfirmationModal open={!!confirmProps} title={confirmProps?.title||''} body={confirmProps?.body||''} onConfirm={() => { confirmProps?.onConfirm && confirmProps.onConfirm(); setConfirmProps(null); }} onCancel={() => setConfirmProps(null)} />
+      <BankruptcyModal open={bankruptOpen} funds={company?.funds||0} onLoan={handleLoan} onInvestor={handleInvestor} onRollback={handleRollback} />
+    </div>
+  );
+};
+
+export default App;

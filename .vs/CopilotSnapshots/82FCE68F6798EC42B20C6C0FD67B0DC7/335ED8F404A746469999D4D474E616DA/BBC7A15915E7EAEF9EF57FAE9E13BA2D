@@ -1,0 +1,32 @@
+﻿import React, { useEffect } from 'react';
+
+export type ToastItem = { id: string, type: 'info'|'success'|'warning'|'error', title?: string, message: string, ttl?: number };
+
+export function Toasts({ list, onRemove }: { list: ToastItem[], onRemove: (id:string)=>void }) {
+  useEffect(() => {
+    const timers: any[] = [];
+    list.forEach(item => {
+      // Skrócony czas wyświetlania do 1500ms (1.5 sekundy)
+      const ttl = item.ttl ?? 1500;
+      const t = setTimeout(() => onRemove(item.id), ttl);
+      timers.push(t);
+    });
+    return () => timers.forEach(t => clearTimeout(t));
+  }, [list, onRemove]);
+
+  if (!list || list.length === 0) return null;
+  return (
+    <div style={{ position:'fixed', right:20, top:20, zIndex:9999, display:'flex', flexDirection:'column', gap:8 }}>
+      {list.map(t => (
+        <div key={t.id} style={{
+          minWidth:240, padding:10, borderRadius:8, boxShadow:'0 6px 18px rgba(0,0,0,0.12)',
+          background: t.type === 'success' ? '#e6ffed' : t.type === 'error' ? '#ffe6e6' : t.type === 'warning' ? '#fff4e5' : '#f0f7ff',
+          border: '1px solid rgba(0,0,0,0.06)'
+        }}>
+          <div style={{ fontWeight:700, marginBottom:4 }}>{t.title ?? (t.type[0].toUpperCase()+t.type.slice(1))}</div>
+          <div style={{ fontSize:13 }}>{t.message}</div>
+        </div>
+      ))}
+    </div>
+  );
+}

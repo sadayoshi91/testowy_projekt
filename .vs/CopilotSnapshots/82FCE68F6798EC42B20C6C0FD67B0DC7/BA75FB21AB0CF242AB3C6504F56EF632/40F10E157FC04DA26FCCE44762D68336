@@ -1,0 +1,55 @@
+﻿import React, { useState } from 'react';
+
+export function FinancePanel({ company, nextPayoutDays, runPayrollNow, exportPayroll, updateSalary, openConfirmation }: any) {
+  const employees = Array.isArray(company?.employees) ? company.employees : [];
+  const totalPayroll = employees.reduce((acc:number, e:any) => acc + (Number(e?.salary || 0)), 0);
+  const [interval, setInterval] = useState(company?.payrollIntervalDays || 30);
+
+  const onRun = () => {
+    openConfirmation({
+      title: 'Run payroll now?',
+      body: `This will deduct ${totalPayroll.toFixed(2)} plus taxes and rent from funds.`,
+      onConfirm: () => { runPayrollNow(); },
+      onCancel: () => {}
+    });
+  };
+
+  return (
+    <div style={{ border: '1px solid #eee', padding: 10, borderRadius: 6, background: '#fff' }}>
+      <h3>Finance</h3>
+      <div>Funds: {(company?.funds ?? 0).toFixed(2)}</div>
+      <div style={{ marginTop:8 }}><strong>Payroll (sum salaries):</strong> {totalPayroll.toFixed(2)}</div>
+      <div style={{ marginTop:4 }}><strong>Next payout in:</strong> {nextPayoutDays} days</div>
+
+      <div style={{ marginTop:8 }}>
+        <button onClick={onRun}>Run payroll now</button>
+        <button style={{ marginLeft:8 }} onClick={() => exportPayroll()}>Export payroll history</button>
+      </div>
+
+      <div style={{ marginTop:10 }}>
+        <label>Payroll interval (days): </label>
+        <input type="number" value={interval} onChange={(e)=> setInterval(Number(e.target.value || 30))} style={{ width:80 }} />
+        <button style={{ marginLeft:8 }} onClick={()=> { if (company) company.payrollIntervalDays = interval; alert('Interval set (will apply on next reload)'); }}>Set</button>
+      </div>
+
+      <div style={{ marginTop:12 }}>
+        <strong>Employees</strong>
+        <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:6 }}>
+          {employees.map((emp:any) => (
+            <div key={emp.id} style={{ display:'flex', gap:8, alignItems:'center', border:'1px solid #eee', padding:6, borderRadius:6 }}>
+              <div style={{ flex:1 }}>{emp.name} <small style={{ color:'#666' }}>({emp.role})</small></div>
+              <div>
+                <input type="number" defaultValue={emp.salary || 0} id={`salary-${emp.id}`} style={{ width:100 }} />
+                <button style={{ marginLeft:6 }} onClick={() => {
+                  const el = document.getElementById(`salary-${emp.id}`) as HTMLInputElement|null;
+                  const val = el ? Number(el.value) : 0;
+                  updateSalary(emp.id, val);
+                }}>Set</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,17 @@
+﻿// src/models/project.ts
+export type Role = 'developer' | 'designer' | 'marketer' | 'researcher';
+
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  effort: number; // total required work units
+  progress: number; // completed work units
+  reward: number; // funds to pay when completed
+  requiredRoles: Role[]; // roles that are useful/required
+  assignees: string[]; // employee ids
+  createdAt: string;
+  completed?: boolean;
+  deadline?: string | null; // optional ISO date
+  rewardPaid?: boolean;
+}

@@ -1,0 +1,10 @@
+﻿export {};
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      saveFile?: (name: string, data: string) => Promise<{ success: boolean; path?: string; error?: string }>;
+      loadFile?: (name: string) => Promise<{ success: boolean; data?: string | null; error?: string }>;
+    };
+  }
+}

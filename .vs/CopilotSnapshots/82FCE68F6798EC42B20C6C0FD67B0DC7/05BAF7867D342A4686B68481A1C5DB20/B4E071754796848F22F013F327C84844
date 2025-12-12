@@ -1,0 +1,18 @@
+﻿// src/models/training.ts
+import { Role } from './project';
+
+export interface Training {
+ id: string;
+ name: string;
+ description?: string;
+ role: Role;
+ skillGain: number;
+ moraleGain?: number; // NEW: morale boost
+ newRole?: Role; // NEW: unlock new role
+ durationDays: number;
+ cost: number;
+ assignedEmployeeId?: string;
+ startedAt?: string;
+ completedAt?: string;
+ status: 'available' | 'in_progress' | 'completed';
+}

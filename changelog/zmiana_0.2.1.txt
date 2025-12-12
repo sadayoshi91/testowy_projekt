@@ -1,0 +1,8 @@
+Zmiana0.2.1
+
+- Losowe generowanie kontraktów co7 dni gry
+- Deadline: automatyczne wygasanie kontraktów po terminie
+- Kary za niewykonanie kontraktu (utrata reputacji, œrodków)
+- Nagrody za ukoñczenie kontraktu (wzrost reputacji, œrodki)
+- Prosty ranking firmy na podstawie ukoñczonych kontraktów i reputacji
+- Wyœwietlanie rankingu i reputacji w UI

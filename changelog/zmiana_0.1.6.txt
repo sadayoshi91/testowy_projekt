@@ -1,0 +1,7 @@
+Zmiana0.1.6
+
+- Dodano model Training (szkolenie) w src/models/training.ts
+- Dodano pole trainings do modelu Company
+- Dodano komponent TrainingsPanel do wyœwietlania i rozpoczynania szkoleñ
+- Dodano przyk³adowe szkolenia do stanu pocz¹tkowego firmy
+- Obs³uga rozpoczêcia szkolenia: zmiana statusu, przypisanie pracownika, wpis do event loga
