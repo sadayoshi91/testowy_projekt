@@ -4,3 +4,6 @@ dist/
 .DS_Store
 coverage
 *.tsbuildinfo*.tsbuildinfo
+.vs/
+*.code-workspace
+CopilotSnapshots/
